@@ -1,0 +1,194 @@
+body {
+  width: 300px;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.site-info {
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  word-break: break-word;
+}
+
+.timer-section {
+  margin-bottom: 20px;
+}
+
+.timer-input {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+input[type="number"] {
+  width: 60px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.timer-display {
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  color: #2563eb;
+  margin: 15px 0;
+}
+
+.timer-display.warning {
+  color: #dc2626;
+}
+
+button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.start-btn {
+  background: #2563eb;
+  color: white;
+}
+
+.start-btn:hover {
+  background: #1d4ed8;
+}
+
+.stop-btn {
+  background: #dc2626;
+  color: white;
+}
+
+.stop-btn:hover {
+  background: #b91c1c;
+}
+
+.reset-btn {
+  background: #6b7280;
+  color: white;
+}
+
+.reset-btn:hover {
+  background: #4b5563;
+}
+
+.status {
+  text-align: center;
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 10px;
+}
+
+.refocus-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.refocus-modal {
+  background: white;
+  border-radius: 12px;
+  padding: 0;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  animation: refocus-slide-in 0.3s ease-out;
+}
+
+@keyframes refocus-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.refocus-header {
+  background: #2563eb;
+  color: white;
+  padding: 20px;
+  border-radius: 12px 12px 0 0;
+  text-align: center;
+}
+
+.refocus-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.refocus-body {
+  padding: 24px;
+  text-align: center;
+}
+
+.refocus-body p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #374151;
+}
+
+.refocus-buttons {
+  padding: 0 24px 24px;
+  display: flex;
+  gap: 12px;
+  flex-direction: column;
+}
+
+.refocus-btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refocus-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.refocus-primary:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.refocus-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.refocus-secondary:hover {
+  background: #e5e7eb;
+  transform: translateY(-1px);
+}
