@@ -1,9 +1,120 @@
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("Content script received message:", message);
   if (message.type === "TIMER_EXPIRED") {
+    console.log("Timer expired, showing modal");
     showTimeUpModal();
+    sendResponse({ success: true });
   }
+  return true; // Keep message channel open for async response
 });
+
+function injectModalStyles() {
+  const style = document.createElement("style");
+  style.id = "refocus-styles";
+  style.textContent = `
+    .refocus-overlay {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      background: rgba(0, 0, 0, 0.7) !important;
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      z-index: 2147483647 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    }
+
+    .refocus-modal {
+      background: white !important;
+      border-radius: 12px !important;
+      padding: 0 !important;
+      max-width: 400px !important;
+      width: 90% !important;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1) !important;
+      animation: refocus-slide-in 0.3s ease-out !important;
+    }
+
+    @keyframes refocus-slide-in {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .refocus-header {
+      background: #2563eb !important;
+      color: white !important;
+      padding: 20px !important;
+      border-radius: 12px 12px 0 0 !important;
+      text-align: center !important;
+    }
+
+    .refocus-header h2 {
+      margin: 0 !important;
+      font-size: 24px !important;
+      font-weight: 600 !important;
+      color: white !important;
+    }
+
+    .refocus-body {
+      padding: 24px !important;
+      text-align: center !important;
+    }
+
+    .refocus-body p {
+      margin: 0 !important;
+      font-size: 16px !important;
+      line-height: 1.5 !important;
+      color: #374151 !important;
+    }
+
+    .refocus-buttons {
+      padding: 0 24px 24px !important;
+      display: flex !important;
+      gap: 12px !important;
+      flex-direction: column !important;
+    }
+
+    .refocus-btn {
+      padding: 12px 24px !important;
+      border: none !important;
+      border-radius: 8px !important;
+      font-size: 16px !important;
+      font-weight: 600 !important;
+      cursor: pointer !important;
+      transition: all 0.2s ease !important;
+    }
+
+    .refocus-primary {
+      background: #2563eb !important;
+      color: white !important;
+    }
+
+    .refocus-primary:hover {
+      background: #1d4ed8 !important;
+      transform: translateY(-1px) !important;
+    }
+
+    .refocus-secondary {
+      background: #f3f4f6 !important;
+      color: #374151 !important;
+      border: 1px solid #d1d5db !important;
+    }
+
+    .refocus-secondary:hover {
+      background: #e5e7eb !important;
+      transform: translateY(-1px) !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 function showTimeUpModal() {
   // Remove any existing modal
@@ -12,29 +123,56 @@ function showTimeUpModal() {
     existingModal.remove();
   }
 
-  // Create modal HTML
+  // Inject CSS styles if not already present
+  if (!document.getElementById("refocus-styles")) {
+    injectModalStyles();
+  }
+
+  // Create modal elements without innerHTML to avoid CSP issues
   const modal = document.createElement("div");
   modal.id = "refocus-modal";
-  modal.innerHTML = `
-    <div class="refocus-overlay">
-      <div class="refocus-modal">
-        <div class="refocus-header">
-          <h2>🎯 Time to reFocus!</h2>
-        </div>
-        <div class="refocus-body">
-          <p>Your time is up! Reset the timer for more time or move on to your next task.</p>
-        </div>
-        <div class="refocus-buttons">
-          <button id="refocus-reset" class="refocus-btn refocus-primary">
-            Reset Timer (5 min)
-          </button>
-          <button id="refocus-dismiss" class="refocus-btn refocus-secondary">
-            Move On
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
+
+  const overlay = document.createElement("div");
+  overlay.className = "refocus-overlay";
+
+  const modalContent = document.createElement("div");
+  modalContent.className = "refocus-modal";
+
+  const header = document.createElement("div");
+  header.className = "refocus-header";
+  const headerText = document.createElement("h2");
+  headerText.textContent = "🎯 Time to reFocus!";
+  header.appendChild(headerText);
+
+  const body = document.createElement("div");
+  body.className = "refocus-body";
+  const bodyText = document.createElement("p");
+  bodyText.textContent =
+    "Your time is up! Reset the timer for more time or move on to your next task.";
+  body.appendChild(bodyText);
+
+  const buttons = document.createElement("div");
+  buttons.className = "refocus-buttons";
+
+  const resetButton = document.createElement("button");
+  resetButton.id = "refocus-reset";
+  resetButton.className = "refocus-btn refocus-primary";
+  resetButton.textContent = "Reset Timer (5 min)";
+
+  const dismissButton = document.createElement("button");
+  dismissButton.id = "refocus-dismiss";
+  dismissButton.className = "refocus-btn refocus-secondary";
+  dismissButton.textContent = "Move On";
+
+  buttons.appendChild(resetButton);
+  buttons.appendChild(dismissButton);
+
+  modalContent.appendChild(header);
+  modalContent.appendChild(body);
+  modalContent.appendChild(buttons);
+
+  overlay.appendChild(modalContent);
+  modal.appendChild(overlay);
 
   // Add modal to body
   document.body.appendChild(modal);

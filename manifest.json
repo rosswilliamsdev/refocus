@@ -3,7 +3,7 @@
   "name": "reFocus",
   "version": "1.0",
   "description": "Regain control of your attention with mindful browsing timers",
-  "permissions": ["activeTab", "storage", "alarms"],
+  "permissions": ["activeTab", "storage", "alarms", "tabs"],
   "background": {
     "service_worker": "background.js"
   },
