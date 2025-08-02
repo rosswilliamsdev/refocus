@@ -1,3 +1,23 @@
+console.log("reFocus content script loaded on:", window.location.hostname);
+
+// Clean hostname to remove protocols, www, etc.
+function cleanHostname(input) {
+  let hostname = input.trim().toLowerCase();
+  
+  // Remove protocol if present
+  hostname = hostname.replace(/^https?:\/\//, '');
+  
+  // Remove www. if present
+  hostname = hostname.replace(/^www\./, '');
+  
+  // Remove path, query params, etc.
+  hostname = hostname.split('/')[0];
+  hostname = hostname.split('?')[0];
+  hostname = hostname.split('#')[0];
+  
+  return hostname;
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Content script received message:", message);
@@ -157,7 +177,7 @@ function showTimeUpModal() {
   const resetButton = document.createElement("button");
   resetButton.id = "refocus-reset";
   resetButton.className = "refocus-btn refocus-primary";
-  resetButton.textContent = "Reset Timer (5 min)";
+  resetButton.textContent = "Reset Timer (4 sec)";
 
   const dismissButton = document.createElement("button");
   dismissButton.id = "refocus-dismiss";
@@ -181,20 +201,24 @@ function showTimeUpModal() {
   document
     .getElementById("refocus-reset")
     .addEventListener("click", async () => {
-      const hostname = window.location.hostname;
-      const endTime = Date.now() + 5 * 60 * 1000; // 5 minutes
+      const rawHostname = window.location.hostname;
+      const cleanedHostname = cleanHostname(rawHostname);
+      
+      // Use default timer duration (4 seconds = 4000ms)
+      const defaultMs = 4 * 1000;
+      const endTime = Date.now() + defaultMs;
 
-      // Save new timer state
+      // Save new timer state using cleaned hostname
       await chrome.storage.local.set({
-        [hostname]: {
+        [cleanedHostname]: {
           isActive: true,
           endTime: endTime,
-          totalMs: 5 * 60 * 1000,
+          totalMs: defaultMs,
         },
       });
 
       // Create new alarm
-      await chrome.alarms.create(`timer_${hostname}`, {
+      await chrome.alarms.create(`timer_${cleanedHostname}`, {
         when: endTime,
       });
 

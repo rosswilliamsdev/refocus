@@ -1,3 +1,21 @@
+// Clean hostname to remove protocols, www, etc.
+function cleanHostname(input) {
+  let hostname = input.trim().toLowerCase();
+  
+  // Remove protocol if present
+  hostname = hostname.replace(/^https?:\/\//, '');
+  
+  // Remove www. if present
+  hostname = hostname.replace(/^www\./, '');
+  
+  // Remove path, query params, etc.
+  hostname = hostname.split('/')[0];
+  hostname = hostname.split('?')[0];
+  hostname = hostname.split('#')[0];
+  
+  return hostname;
+}
+
 // Handle alarm events
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   console.log("Alarm triggered:", alarm.name);
@@ -15,7 +33,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         if (!tab.url) return false;
         try {
           const tabUrl = new URL(tab.url);
-          const matches = tabUrl.hostname === hostname;
+          const cleanedTabHostname = cleanHostname(tabUrl.hostname);
+          const cleanedStoredHostname = cleanHostname(hostname);
+          
+          const matches = cleanedTabHostname === cleanedStoredHostname || 
+                         cleanedTabHostname.includes(cleanedStoredHostname) || 
+                         cleanedStoredHostname.includes(cleanedTabHostname);
+          
           if (matches) {
             console.log("Found matching tab:", tab.id, tab.url);
           }

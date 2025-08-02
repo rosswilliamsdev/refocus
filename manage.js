@@ -1,35 +1,12 @@
 document.addEventListener("DOMContentLoaded", async () => {
-  const currentSiteEl = document.getElementById("currentSite");
-  const addCurrentSiteBtn = document.getElementById("addCurrentSite");
-  const manageTimersBtn = document.getElementById("manageTimersBtn");
-  const currentSiteTimer = document.getElementById("currentSiteTimer");
-  const siteNotManaged = document.getElementById("siteNotManaged");
+  const manualSiteInput = document.getElementById("manualSiteInput");
+  const addManualSiteBtn = document.getElementById("addManualSite");
+  const sitesContainer = document.getElementById("sitesContainer");
 
-  let currentHostname = "";
   let siteTimers = {}; // Store timer intervals for each site
 
   // Storage keys
   const SITES_LIST_KEY = "refocus_sites_list";
-
-  // Get current active tab's hostname
-  async function getCurrentSite() {
-    try {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      if (tab && tab.url) {
-        const url = new URL(tab.url);
-        currentHostname = url.hostname;
-        currentSiteEl.textContent = currentHostname;
-      } else {
-        currentSiteEl.textContent = "No active tab";
-      }
-    } catch (error) {
-      currentSiteEl.textContent = "Unable to detect site";
-      console.error("Error getting current site:", error);
-    }
-  }
 
   // Load sites list from storage
   async function loadSitesList() {
@@ -71,8 +48,28 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     sites.push({ hostname, timerData: null });
     await saveSitesList(sites);
-    await renderCurrentSiteTimer();
+    await renderSitesList();
     showTemporaryMessage("Site added!");
+  }
+
+  // Remove site from the list
+  async function removeSite(hostname) {
+    const sites = await loadSitesList();
+    const filteredSites = sites.filter((site) => site.hostname !== hostname);
+
+    await saveSitesList(filteredSites);
+
+    // Clear any active timer and storage for this site
+    await chrome.alarms.clear(`timer_${hostname}`);
+    await chrome.storage.local.remove(hostname);
+
+    // Clear timer interval if running
+    if (siteTimers[hostname]) {
+      clearInterval(siteTimers[hostname]);
+      delete siteTimers[hostname];
+    }
+
+    await renderSitesList();
   }
 
   // Clean hostname to remove protocols, www, etc.
@@ -114,7 +111,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       when: endTime,
     });
 
-    await renderCurrentSiteTimer();
+    await renderSitesList();
   }
 
   // Stop timer for a site
@@ -131,7 +128,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       delete siteTimers[hostname];
     }
 
-    await renderCurrentSiteTimer();
+    await renderSitesList();
   }
 
   // Reset timer for a site
@@ -180,35 +177,15 @@ document.addEventListener("DOMContentLoaded", async () => {
           updateTimerDisplay(hostname, 0);
           // Timer expired - background script will handle it
           // Just update the UI after a short delay
-          setTimeout(() => renderCurrentSiteTimer(), 1000);
+          setTimeout(() => renderSitesList(), 1000);
         }
       } else {
         // Timer was stopped
         clearInterval(siteTimers[hostname]);
         delete siteTimers[hostname];
-        renderCurrentSiteTimer();
+        renderSitesList();
       }
     }, 1000);
-  }
-
-  // Remove site from the list
-  async function removeSite(hostname) {
-    const sites = await loadSitesList();
-    const filteredSites = sites.filter(site => site.hostname !== hostname);
-    
-    await saveSitesList(filteredSites);
-    
-    // Clear any active timer and storage for this site
-    await chrome.alarms.clear(`timer_${hostname}`);
-    await chrome.storage.local.remove(hostname);
-    
-    // Clear timer interval if running
-    if (siteTimers[hostname]) {
-      clearInterval(siteTimers[hostname]);
-      delete siteTimers[hostname];
-    }
-    
-    await renderCurrentSiteTimer();
   }
 
   // Render a single site item
@@ -304,8 +281,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         let seconds = 0;
 
         if (minutesEl && secondsEl) {
-          minutes = parseInt(minutesEl.value) || 5;
-          seconds = parseInt(secondsEl.value) || 0;
+          minutes = parseInt(minutesEl.value);
+          seconds = parseInt(secondsEl.value);
         }
 
         await resetTimer(hostname, minutes, seconds);
@@ -316,24 +293,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Preserve input values before re-rendering
-  function preserveCurrentSiteInputValues() {
+  function preserveInputValues() {
     const inputValues = {};
-    const minutesInput = currentSiteTimer.querySelector('input[id^="minutes-"]');
-    const secondsInput = currentSiteTimer.querySelector('input[id^="seconds-"]');
-    
-    if (minutesInput) {
-      inputValues[minutesInput.id] = minutesInput.value;
-    }
-    if (secondsInput) {
-      inputValues[secondsInput.id] = secondsInput.value;
-    }
-    
+    const minutesInputs = document.querySelectorAll('input[id^="minutes-"]');
+    const secondsInputs = document.querySelectorAll('input[id^="seconds-"]');
+
+    minutesInputs.forEach((input) => {
+      inputValues[input.id] = input.value;
+    });
+
+    secondsInputs.forEach((input) => {
+      inputValues[input.id] = input.value;
+    });
+
     return inputValues;
   }
 
   // Restore input values after re-rendering
-  function restoreCurrentSiteInputValues(inputValues) {
-    Object.keys(inputValues).forEach(inputId => {
+  function restoreInputValues(inputValues) {
+    Object.keys(inputValues).forEach((inputId) => {
       const input = document.getElementById(inputId);
       if (input) {
         input.value = inputValues[inputId];
@@ -341,57 +319,42 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Render current site timer
-  async function renderCurrentSiteTimer() {
-    if (!currentHostname) {
-      currentSiteTimer.innerHTML =
-        '<div class="no-current-site">Navigate to a website to see timer controls</div>';
-      siteNotManaged.style.display = "none";
-      return;
-    }
-
+  // Render the sites list
+  async function renderSitesList() {
     const sites = await loadSitesList();
-    const cleanedCurrentHostname = cleanHostname(currentHostname);
-    const currentSite = sites.find((site) => 
-      site.hostname === cleanedCurrentHostname || 
-      cleanedCurrentHostname.includes(site.hostname) || 
-      site.hostname.includes(cleanedCurrentHostname)
-    );
 
-    // Preserve current input values before clearing
-    const inputValues = preserveCurrentSiteInputValues();
+    // Preserve current input values
+    const inputValues = preserveInputValues();
 
-    // Clear existing timer interval for current site
-    if (siteTimers[currentHostname]) {
-      clearInterval(siteTimers[currentHostname]);
-      delete siteTimers[currentHostname];
-    }
+    // Clear existing timers
+    Object.keys(siteTimers).forEach((hostname) => {
+      clearInterval(siteTimers[hostname]);
+      delete siteTimers[hostname];
+    });
 
-    if (!currentSite) {
-      // Site is not managed
-      currentSiteTimer.innerHTML = "";
-      siteNotManaged.style.display = "block";
+    sitesContainer.innerHTML = "";
+
+    if (sites.length === 0) {
+      sitesContainer.innerHTML =
+        '<div class="no-sites">No sites added yet. Add a site to get started!</div>';
       return;
     }
 
-    // Site is managed - show timer controls
-    siteNotManaged.style.display = "none";
-    const siteEl = createSiteElement(currentSite);
-    currentSiteTimer.innerHTML = "";
-    currentSiteTimer.appendChild(siteEl);
+    sites.forEach((site) => {
+      const siteEl = createSiteElement(site);
+      sitesContainer.appendChild(siteEl);
 
-    // Restore input values after rendering (but only if timer is not active)
-    if (!currentSite.timerData || !currentSite.timerData.isActive) {
-      restoreCurrentSiteInputValues(inputValues);
-    }
-
-    // Start countdown if timer is active
-    if (currentSite.timerData && currentSite.timerData.isActive) {
-      const remaining = Math.max(0, currentSite.timerData.endTime - Date.now());
-      if (remaining > 0) {
-        startCountdown(currentSite.hostname, remaining);
+      // Start countdown if timer is active
+      if (site.timerData && site.timerData.isActive) {
+        const remaining = Math.max(0, site.timerData.endTime - Date.now());
+        if (remaining > 0) {
+          startCountdown(site.hostname, remaining);
+        }
       }
-    }
+    });
+
+    // Restore input values after rendering
+    restoreInputValues(inputValues);
   }
 
   // Show temporary message
@@ -417,25 +380,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Event listeners
-  addCurrentSiteBtn.addEventListener("click", async () => {
-    if (!currentHostname) {
-      showTemporaryMessage("Please navigate to a website first");
+  addManualSiteBtn.addEventListener("click", async () => {
+    const hostname = manualSiteInput.value.trim();
+    if (!hostname) {
+      showTemporaryMessage("Please enter a site");
       return;
     }
-    await addSite(currentHostname);
+
+    await addSite(hostname);
+    manualSiteInput.value = "";
   });
 
-  manageTimersBtn.addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("manage.html") });
+  // Allow Enter key to add manual site
+  manualSiteInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      addManualSiteBtn.click();
+    }
   });
 
   // Initialize
-  await getCurrentSite();
-  await renderCurrentSiteTimer();
-
-  // Update current site info periodically
-  setInterval(async () => {
-    await getCurrentSite();
-    await renderCurrentSiteTimer();
-  }, 1000);
+  await renderSitesList();
 });
