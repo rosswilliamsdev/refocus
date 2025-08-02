@@ -16,6 +16,56 @@ function cleanHostname(input) {
   return hostname;
 }
 
+// Handle messages from content scripts
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  if (message.type === "START_TIMER") {
+    const { hostname, duration } = message;
+    const endTime = Date.now() + duration;
+
+    try {
+      // Save timer state
+      await chrome.storage.local.set({
+        [hostname]: {
+          isActive: true,
+          endTime: endTime,
+          totalMs: duration,
+        },
+      });
+
+      // Create alarm
+      await chrome.alarms.create(`timer_${hostname}`, {
+        when: endTime,
+      });
+
+      console.log("Background: Started timer for", hostname, "duration:", duration + "ms");
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error("Background: Failed to start timer:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.type === "STOP_TIMER") {
+    const { hostname } = message;
+
+    try {
+      // Clear alarm
+      await chrome.alarms.clear(`timer_${hostname}`);
+      
+      // Remove storage
+      await chrome.storage.local.remove(hostname);
+
+      console.log("Background: Stopped timer for", hostname);
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error("Background: Failed to stop timer:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Keep message channel open for async response
+  }
+});
+
 // Handle alarm events
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   console.log("Alarm triggered:", alarm.name);

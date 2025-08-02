@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Storage keys
   const SITES_LIST_KEY = "refocus_sites_list";
+  const TIMER_SETTINGS_KEY = "refocus_timer_settings";
 
   // Get current active tab's hostname
   async function getCurrentSite() {
@@ -52,6 +53,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function saveSitesList(sites) {
     const hostnameList = sites.map((site) => site.hostname);
     await chrome.storage.local.set({ [SITES_LIST_KEY]: hostnameList });
+  }
+
+  // Load timer settings from storage
+  async function loadTimerSettings() {
+    const result = await chrome.storage.local.get([TIMER_SETTINGS_KEY]);
+    return result[TIMER_SETTINGS_KEY] || {};
+  }
+
+  // Save timer settings to storage
+  async function saveTimerSettings(settings) {
+    await chrome.storage.local.set({ [TIMER_SETTINGS_KEY]: settings });
+  }
+
+  // Save timer values for a specific site
+  async function saveTimerForSite(hostname, minutes, seconds) {
+    console.log('Popup - Saving timer for site:', hostname, 'values:', { minutes, seconds });
+    const settings = await loadTimerSettings();
+    settings[hostname] = { minutes, seconds };
+    await saveTimerSettings(settings);
+    console.log('Popup - Updated settings:', settings);
+  }
+
+  // Get saved timer values for a site (or defaults)
+  async function getTimerForSite(hostname) {
+    const settings = await loadTimerSettings();
+    const result = settings[hostname] || { minutes: 0, seconds: 4 };
+    console.log('Popup - Loading timer for site:', hostname, 'result:', result, 'from settings:', settings);
+    return result;
   }
 
   // Add site to the list
@@ -212,12 +241,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Render a single site item
-  function createSiteElement(site) {
+  async function createSiteElement(site) {
     const { hostname, timerData } = site;
     const isActive = timerData && timerData.isActive;
     const remainingMs = isActive
       ? Math.max(0, timerData.endTime - Date.now())
       : 0;
+
+    // Get saved timer values for this site
+    const savedTimer = await getTimerForSite(hostname);
 
     const siteEl = document.createElement("div");
     siteEl.className = "site-item";
@@ -247,12 +279,13 @@ document.addEventListener("DOMContentLoaded", async () => {
             : `
           <div class="timer-input-row">
             <label>Min:</label>
-            <input type="number" id="minutes-${hostname}" min="0" max="999" value="0" />
+            <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
             <label>Sec:</label>
-            <input type="number" id="seconds-${hostname}" min="0" max="59" value="4" />
+            <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
           </div>
           <div class="timer-controls">
             <button class="start-btn" data-hostname="${hostname}">Start Timer</button>
+            <button class="save-btn" data-hostname="${hostname}">Save Settings</button>
           </div>
         `
         }
@@ -264,6 +297,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const startBtn = siteEl.querySelector(".start-btn");
     const stopBtn = siteEl.querySelector(".stop-btn");
     const resetBtn = siteEl.querySelector(".reset-btn");
+    const saveBtn = siteEl.querySelector(".save-btn");
 
     if (removeBtn) {
       removeBtn.addEventListener("click", async () => {
@@ -284,6 +318,9 @@ document.addEventListener("DOMContentLoaded", async () => {
           return;
         }
 
+        // Save the timer values before starting the timer
+        await saveTimerForSite(hostname, minutes, seconds);
+        
         await startTimer(hostname, minutes, seconds);
       });
     }
@@ -309,6 +346,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
 
         await resetTimer(hostname, minutes, seconds);
+      });
+    }
+
+    // Add save button event listener
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const minutesEl = document.getElementById(`minutes-${hostname}`);
+        const secondsEl = document.getElementById(`seconds-${hostname}`);
+        
+        if (minutesEl && secondsEl) {
+          const minutes = parseInt(minutesEl.value) || 0;
+          const seconds = parseInt(secondsEl.value) || 0;
+          await saveTimerForSite(hostname, minutes, seconds);
+          showTemporaryMessage(`Settings saved for ${hostname}!`);
+        }
       });
     }
 
@@ -376,7 +428,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Site is managed - show timer controls
     siteNotManaged.style.display = "none";
-    const siteEl = createSiteElement(currentSite);
+    const siteEl = await createSiteElement(currentSite);
     currentSiteTimer.innerHTML = "";
     currentSiteTimer.appendChild(siteEl);
 

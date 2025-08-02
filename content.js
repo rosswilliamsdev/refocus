@@ -3,18 +3,18 @@ console.log("reFocus content script loaded on:", window.location.hostname);
 // Clean hostname to remove protocols, www, etc.
 function cleanHostname(input) {
   let hostname = input.trim().toLowerCase();
-  
+
   // Remove protocol if present
-  hostname = hostname.replace(/^https?:\/\//, '');
-  
+  hostname = hostname.replace(/^https?:\/\//, "");
+
   // Remove www. if present
-  hostname = hostname.replace(/^www\./, '');
-  
+  hostname = hostname.replace(/^www\./, "");
+
   // Remove path, query params, etc.
-  hostname = hostname.split('/')[0];
-  hostname = hostname.split('?')[0];
-  hostname = hostname.split('#')[0];
-  
+  hostname = hostname.split("/")[0];
+  hostname = hostname.split("?")[0];
+  hostname = hostname.split("#")[0];
+
   return hostname;
 }
 
@@ -203,7 +203,7 @@ function showTimeUpModal() {
     .addEventListener("click", async () => {
       const rawHostname = window.location.hostname;
       const cleanedHostname = cleanHostname(rawHostname);
-      
+
       // Use default timer duration (4 seconds = 4000ms)
       const defaultMs = 4 * 1000;
       const endTime = Date.now() + defaultMs;
@@ -246,18 +246,121 @@ function showTimeUpModal() {
   document.addEventListener("keydown", handleEscape);
 }
 
-// Check for existing active timer when page loads
+// Storage keys
+const SITES_LIST_KEY = "refocus_sites_list";
+
+// Check if current site is in managed sites list
+async function isSiteManaged() {
+  const result = await chrome.storage.local.get([SITES_LIST_KEY]);
+  const sitesList = result[SITES_LIST_KEY] || [];
+
+  const cleanedCurrentHostname = cleanHostname(window.location.hostname);
+  return sitesList.some(
+    (hostname) =>
+      hostname === cleanedCurrentHostname ||
+      cleanedCurrentHostname.includes(hostname) ||
+      hostname.includes(cleanedCurrentHostname)
+  );
+}
+
+// Start automatic timer for current site
+async function startAutomaticTimer() {
+  const cleanedHostname = cleanHostname(window.location.hostname);
+
+  // Check if there's already an active timer
+  const result = await chrome.storage.local.get([cleanedHostname]);
+  if (result[cleanedHostname] && result[cleanedHostname].isActive) {
+    console.log("Timer already active for", cleanedHostname);
+    return;
+  }
+
+  // Send message to background script to start timer
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "START_TIMER",
+      hostname: cleanedHostname,
+      duration: 4 * 1000, // 4 seconds in milliseconds
+    });
+    console.log(
+      "Auto-started timer for",
+      cleanedHostname,
+      "response:",
+      response
+    );
+  } catch (error) {
+    console.error("Failed to start automatic timer:", error);
+  }
+}
+
+// Stop and reset timer for current site
+async function stopAutomaticTimer() {
+  const cleanedHostname = cleanHostname(window.location.hostname);
+
+  // Send message to background script to stop timer
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "STOP_TIMER",
+      hostname: cleanedHostname,
+    });
+    console.log(
+      "Auto-stopped timer for",
+      cleanedHostname,
+      "response:",
+      response
+    );
+  } catch (error) {
+    console.error("Failed to stop automatic timer:", error);
+  }
+}
+
+// Check for existing active timer when page loads and start automatic timer
 window.addEventListener("load", async () => {
   const hostname = window.location.hostname;
-  const result = await chrome.storage.local.get([hostname]);
-  const siteData = result[hostname];
+  const cleanedHostname = cleanHostname(hostname);
+  console.log("Page loaded - checking timer for:", cleanedHostname);
+
+  const result = await chrome.storage.local.get([cleanedHostname]);
+  const siteData = result[cleanedHostname];
+  console.log("Existing timer data:", siteData);
 
   if (siteData && siteData.isActive) {
     const remaining = siteData.endTime - Date.now();
+    console.log("Active timer found, remaining:", remaining);
     if (remaining <= 0) {
       // Timer expired while page was loading
+      console.log("Timer expired, showing modal");
       showTimeUpModal();
-      await chrome.storage.local.remove(hostname);
+      await chrome.storage.local.remove(cleanedHostname);
     }
+  } else {
+    const isManaged = await isSiteManaged();
+    console.log("Site managed status:", isManaged);
+    if (isManaged) {
+      // Site is managed but no active timer - start automatic timer
+      console.log("Starting automatic timer");
+      await startAutomaticTimer();
+    } else {
+      console.log("Site not managed, no automatic timer");
+    }
+  }
+});
+
+// Handle page visibility changes (tab switching, minimizing)
+document.addEventListener("visibilitychange", async () => {
+  if (await isSiteManaged()) {
+    if (document.hidden) {
+      // Page became hidden - stop timer
+      await stopAutomaticTimer();
+    } else {
+      // Page became visible - start timer
+      await startAutomaticTimer();
+    }
+  }
+});
+
+// Handle beforeunload (navigating away or closing tab)
+window.addEventListener("beforeunload", async () => {
+  if (await isSiteManaged()) {
+    await stopAutomaticTimer();
   }
 });

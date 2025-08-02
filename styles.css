@@ -72,10 +72,34 @@ body.manage-page {
   margin-bottom: 20px;
 }
 
+.sites-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 .sites-header h3 {
-  margin: 0 0 15px 0;
+  margin: 0;
   font-size: 16px;
   color: #374151;
+}
+
+.save-all-btn {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  width: auto;
+  height: 3rem;
+}
+
+.save-all-btn:hover {
+  background: #047857;
 }
 
 .sites-container {
@@ -309,10 +333,22 @@ button {
   background: #2563eb;
   color: white;
   width: auto;
+  flex: 1;
 }
 
 .start-btn:hover {
   background: #1d4ed8;
+}
+
+.save-btn {
+  background: #10b981;
+  color: white;
+  width: auto;
+  flex: 1;
+}
+
+.save-btn:hover {
+  background: #059669;
 }
 
 .stop-btn {

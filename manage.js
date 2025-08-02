@@ -2,11 +2,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   const manualSiteInput = document.getElementById("manualSiteInput");
   const addManualSiteBtn = document.getElementById("addManualSite");
   const sitesContainer = document.getElementById("sitesContainer");
+  const saveAllBtn = document.getElementById("saveAllBtn");
 
   let siteTimers = {}; // Store timer intervals for each site
 
   // Storage keys
   const SITES_LIST_KEY = "refocus_sites_list";
+  const TIMER_SETTINGS_KEY = "refocus_timer_settings";
 
   // Load sites list from storage
   async function loadSitesList() {
@@ -29,6 +31,44 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function saveSitesList(sites) {
     const hostnameList = sites.map((site) => site.hostname);
     await chrome.storage.local.set({ [SITES_LIST_KEY]: hostnameList });
+  }
+
+  // Load timer settings from storage
+  async function loadTimerSettings() {
+    const result = await chrome.storage.local.get([TIMER_SETTINGS_KEY]);
+    return result[TIMER_SETTINGS_KEY] || {};
+  }
+
+  // Save timer settings to storage
+  async function saveTimerSettings(settings) {
+    console.log('About to save settings to storage:', JSON.stringify(settings));
+    try {
+      await chrome.storage.local.set({ [TIMER_SETTINGS_KEY]: settings });
+      console.log('Successfully saved to storage');
+      
+      // Verify it was saved
+      const verification = await chrome.storage.local.get([TIMER_SETTINGS_KEY]);
+      console.log('Verification - what was actually saved:', JSON.stringify(verification));
+    } catch (error) {
+      console.error('Error saving timer settings:', error);
+    }
+  }
+
+  // Save timer values for a specific site
+  async function saveTimerForSite(hostname, minutes, seconds) {
+    console.log('Saving timer for site:', hostname, 'values:', { minutes, seconds });
+    const settings = await loadTimerSettings();
+    settings[hostname] = { minutes, seconds };
+    await saveTimerSettings(settings);
+    console.log('Updated settings:', JSON.stringify(settings));
+  }
+
+  // Get saved timer values for a site (or defaults)
+  async function getTimerForSite(hostname) {
+    const settings = await loadTimerSettings();
+    const result = settings[hostname] || { minutes: 0, seconds: 4 };
+    console.log('Loading timer for site:', hostname, 'result:', JSON.stringify(result), 'from settings:', JSON.stringify(settings));
+    return result;
   }
 
   // Add site to the list
@@ -189,12 +229,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Render a single site item
-  function createSiteElement(site) {
+  async function createSiteElement(site) {
     const { hostname, timerData } = site;
     const isActive = timerData && timerData.isActive;
     const remainingMs = isActive
       ? Math.max(0, timerData.endTime - Date.now())
       : 0;
+
+    // Get saved timer values for this site
+    const savedTimer = await getTimerForSite(hostname);
 
     const siteEl = document.createElement("div");
     siteEl.className = "site-item";
@@ -224,12 +267,13 @@ document.addEventListener("DOMContentLoaded", async () => {
             : `
           <div class="timer-input-row">
             <label>Min:</label>
-            <input type="number" id="minutes-${hostname}" min="0" max="999" value="0" />
+            <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
             <label>Sec:</label>
-            <input type="number" id="seconds-${hostname}" min="0" max="59" value="4" />
+            <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
           </div>
           <div class="timer-controls">
             <button class="start-btn" data-hostname="${hostname}">Start Timer</button>
+            <button class="save-btn" data-hostname="${hostname}">Save Settings</button>
           </div>
         `
         }
@@ -241,6 +285,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const startBtn = siteEl.querySelector(".start-btn");
     const stopBtn = siteEl.querySelector(".stop-btn");
     const resetBtn = siteEl.querySelector(".reset-btn");
+    const saveBtn = siteEl.querySelector(".save-btn");
 
     if (removeBtn) {
       removeBtn.addEventListener("click", async () => {
@@ -261,6 +306,9 @@ document.addEventListener("DOMContentLoaded", async () => {
           return;
         }
 
+        // Save the timer values before starting the timer
+        await saveTimerForSite(hostname, minutes, seconds);
+        
         await startTimer(hostname, minutes, seconds);
       });
     }
@@ -289,42 +337,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     }
 
+    // Add save button event listener
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const minutesEl = document.getElementById(`minutes-${hostname}`);
+        const secondsEl = document.getElementById(`seconds-${hostname}`);
+        
+        if (minutesEl && secondsEl) {
+          const minutes = parseInt(minutesEl.value) || 0;
+          const seconds = parseInt(secondsEl.value) || 0;
+          await saveTimerForSite(hostname, minutes, seconds);
+          showTemporaryMessage(`Settings saved for ${hostname}!`);
+        }
+      });
+    }
+
     return siteEl;
   }
 
-  // Preserve input values before re-rendering
-  function preserveInputValues() {
-    const inputValues = {};
-    const minutesInputs = document.querySelectorAll('input[id^="minutes-"]');
-    const secondsInputs = document.querySelectorAll('input[id^="seconds-"]');
-
-    minutesInputs.forEach((input) => {
-      inputValues[input.id] = input.value;
-    });
-
-    secondsInputs.forEach((input) => {
-      inputValues[input.id] = input.value;
-    });
-
-    return inputValues;
-  }
-
-  // Restore input values after re-rendering
-  function restoreInputValues(inputValues) {
-    Object.keys(inputValues).forEach((inputId) => {
-      const input = document.getElementById(inputId);
-      if (input) {
-        input.value = inputValues[inputId];
-      }
-    });
-  }
 
   // Render the sites list
   async function renderSitesList() {
     const sites = await loadSitesList();
-
-    // Preserve current input values
-    const inputValues = preserveInputValues();
 
     // Clear existing timers
     Object.keys(siteTimers).forEach((hostname) => {
@@ -340,8 +374,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    sites.forEach((site) => {
-      const siteEl = createSiteElement(site);
+    for (const site of sites) {
+      const siteEl = await createSiteElement(site);
       sitesContainer.appendChild(siteEl);
 
       // Start countdown if timer is active
@@ -351,10 +385,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           startCountdown(site.hostname, remaining);
         }
       }
-    });
-
-    // Restore input values after rendering
-    restoreInputValues(inputValues);
+    }
   }
 
   // Show temporary message
@@ -379,6 +410,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 2000);
   }
 
+  // Save all timer settings
+  async function saveAllSettings() {
+    const minutesInputs = document.querySelectorAll('input[id^="minutes-"]');
+    
+    let savedCount = 0;
+    
+    for (const minutesInput of minutesInputs) {
+      const hostname = minutesInput.id.replace('minutes-', '');
+      const secondsInput = document.getElementById(`seconds-${hostname}`);
+      
+      if (secondsInput) {
+        const minutes = parseInt(minutesInput.value) || 0;
+        const seconds = parseInt(secondsInput.value) || 0;
+        await saveTimerForSite(hostname, minutes, seconds);
+        savedCount++;
+      }
+    }
+    
+    showTemporaryMessage(`Saved settings for ${savedCount} sites!`);
+  }
+
   // Event listeners
   addManualSiteBtn.addEventListener("click", async () => {
     const hostname = manualSiteInput.value.trim();
@@ -391,10 +443,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     manualSiteInput.value = "";
   });
 
+  saveAllBtn.addEventListener("click", async () => {
+    await saveAllSettings();
+  });
+
   // Allow Enter key to add manual site
   manualSiteInput.addEventListener("keypress", (e) => {
     if (e.key === "Enter") {
       addManualSiteBtn.click();
+    }
+  });
+
+  // Listen for storage changes (when sites are added from popup)
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes[SITES_LIST_KEY]) {
+      console.log('Sites list changed, re-rendering');
+      renderSitesList();
     }
   });
 
