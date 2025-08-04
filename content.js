@@ -23,7 +23,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Content script received message:", message);
   if (message.type === "TIMER_EXPIRED") {
     console.log("Timer expired, showing modal");
-    showTimeUpModal();
+    showTimeUpModal().catch(console.error);
     sendResponse({ success: true });
   }
   return true; // Keep message channel open for async response
@@ -136,7 +136,7 @@ function injectModalStyles() {
   document.head.appendChild(style);
 }
 
-function showTimeUpModal() {
+async function showTimeUpModal() {
   // Remove any existing modal
   const existingModal = document.getElementById("refocus-modal");
   if (existingModal) {
@@ -174,10 +174,21 @@ function showTimeUpModal() {
   const buttons = document.createElement("div");
   buttons.className = "refocus-buttons";
 
+  // Get saved timer settings for reset button text
+  const rawHostname = window.location.hostname;
+  const cleanedHostname = cleanHostname(rawHostname);
+  const timerSettings = await getTimerForSite(cleanedHostname);
+  
   const resetButton = document.createElement("button");
   resetButton.id = "refocus-reset";
   resetButton.className = "refocus-btn refocus-primary";
-  resetButton.textContent = "Reset Timer (4 sec)";
+  
+  // Display the actual timer duration in the button
+  if (timerSettings.minutes > 0) {
+    resetButton.textContent = `Reset Timer (${timerSettings.minutes}m ${timerSettings.seconds}s)`;
+  } else {
+    resetButton.textContent = `Reset Timer (${timerSettings.seconds}s)`;
+  }
 
   const dismissButton = document.createElement("button");
   dismissButton.id = "refocus-dismiss";
@@ -201,19 +212,16 @@ function showTimeUpModal() {
   document
     .getElementById("refocus-reset")
     .addEventListener("click", async () => {
-      const rawHostname = window.location.hostname;
-      const cleanedHostname = cleanHostname(rawHostname);
-
-      // Use default timer duration (4 seconds = 4000ms)
-      const defaultMs = 4 * 1000;
-      const endTime = Date.now() + defaultMs;
+      // Use saved timer settings instead of default
+      const duration = (timerSettings.minutes * 60 + timerSettings.seconds) * 1000;
+      const endTime = Date.now() + duration;
 
       // Save new timer state using cleaned hostname
       await chrome.storage.local.set({
         [cleanedHostname]: {
           isActive: true,
           endTime: endTime,
-          totalMs: defaultMs,
+          totalMs: duration,
         },
       });
 
@@ -248,6 +256,14 @@ function showTimeUpModal() {
 
 // Storage keys
 const SITES_LIST_KEY = "refocus_sites_list";
+const TIMER_SETTINGS_KEY = "refocus_timer_settings";
+
+// Get saved timer values for a site (or defaults)
+async function getTimerForSite(hostname) {
+  const result = await chrome.storage.local.get([TIMER_SETTINGS_KEY]);
+  const settings = result[TIMER_SETTINGS_KEY] || {};
+  return settings[hostname] || { minutes: 0, seconds: 4 };
+}
 
 // Check if current site is in managed sites list
 async function isSiteManaged() {
@@ -274,16 +290,22 @@ async function startAutomaticTimer() {
     return;
   }
 
+  // Get saved timer settings for this site
+  const timerSettings = await getTimerForSite(cleanedHostname);
+  const duration = (timerSettings.minutes * 60 + timerSettings.seconds) * 1000;
+
   // Send message to background script to start timer
   try {
     const response = await chrome.runtime.sendMessage({
       type: "START_TIMER",
       hostname: cleanedHostname,
-      duration: 4 * 1000, // 4 seconds in milliseconds
+      duration: duration,
     });
     console.log(
       "Auto-started timer for",
       cleanedHostname,
+      "with duration:",
+      duration + "ms",
       "response:",
       response
     );
@@ -329,7 +351,7 @@ window.addEventListener("load", async () => {
     if (remaining <= 0) {
       // Timer expired while page was loading
       console.log("Timer expired, showing modal");
-      showTimeUpModal();
+      showTimeUpModal().catch(console.error);
       await chrome.storage.local.remove(cleanedHostname);
     }
   } else {

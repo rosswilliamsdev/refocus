@@ -333,17 +333,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (resetBtn) {
       resetBtn.addEventListener("click", async () => {
-        const minutesEl = document.getElementById(`minutes-${hostname}`);
-        const secondsEl = document.getElementById(`seconds-${hostname}`);
-
-        // Try to get values from the current timer inputs, or default to 5 minutes
-        let minutes = 5;
-        let seconds = 0;
-
-        if (minutesEl && secondsEl) {
-          minutes = parseInt(minutesEl.value) || 5;
-          seconds = parseInt(secondsEl.value) || 0;
-        }
+        // Get saved timer settings for this site
+        const savedTimer = await getTimerForSite(hostname);
+        const minutes = savedTimer.minutes;
+        const seconds = savedTimer.seconds;
 
         await resetTimer(hostname, minutes, seconds);
       });
