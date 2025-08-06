@@ -1,5 +1,8 @@
 console.log("reFocus content script loaded on:", window.location.hostname);
 
+// Global variable to store the modal keyboard handler
+let modalKeydownHandler = null;
+
 // Clean hostname to remove protocols, www, etc.
 function cleanHostname(input) {
   let hostname = input.trim().toLowerCase();
@@ -29,6 +32,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
+function restoreBackgroundInteraction() {
+  // Re-enable body scrolling
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
+  
+  // Re-enable pointer events and remove inert attribute from background elements
+  const allElements = document.querySelectorAll('body > *:not(#refocus-modal)');
+  allElements.forEach(element => {
+    element.removeAttribute('inert');
+    element.style.pointerEvents = '';
+  });
+  
+  // Remove the modal keyboard event listener
+  if (modalKeydownHandler) {
+    document.removeEventListener('keydown', modalKeydownHandler, true);
+    modalKeydownHandler = null;
+  }
+}
+
 function injectModalStyles() {
   const style = document.createElement("style");
   style.id = "refocus-styles";
@@ -45,6 +67,8 @@ function injectModalStyles() {
       align-items: center !important;
       z-index: 2147483647 !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      pointer-events: auto !important;
+      overflow: hidden !important;
     }
 
     .refocus-modal {
@@ -55,6 +79,8 @@ function injectModalStyles() {
       width: 90% !important;
       box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1) !important;
       animation: refocus-slide-in 0.3s ease-out !important;
+      position: relative !important;
+      pointer-events: auto !important;
     }
 
     @keyframes refocus-slide-in {
@@ -140,12 +166,24 @@ async function showTimeUpModal() {
   // Remove any existing modal
   const existingModal = document.getElementById("refocus-modal");
   if (existingModal) {
+    restoreBackgroundInteraction();
     existingModal.remove();
   }
 
   // Inject CSS styles if not already present
   if (!document.getElementById("refocus-styles")) {
     injectModalStyles();
+  }
+
+  // Get hostname and settings
+  const rawHostname = window.location.hostname;
+  const cleanedHostname = cleanHostname(rawHostname);
+  const timerSettings = await getTimerForSite(cleanedHostname);
+  
+  // Only start cooldown if not already in cooldown (i.e., timer just expired)
+  const alreadyInCooldown = await isSiteInCooldown(cleanedHostname);
+  if (!alreadyInCooldown) {
+    await startCooldown(cleanedHostname);
   }
 
   // Create modal elements without innerHTML to avoid CSP issues
@@ -167,21 +205,24 @@ async function showTimeUpModal() {
   const body = document.createElement("div");
   body.className = "refocus-body";
   const bodyText = document.createElement("p");
-  bodyText.textContent =
-    "Your time is up! Reset the timer for more time or move on to your next task.";
+  bodyText.id = "refocus-body-text";
+  bodyText.textContent = "Your time is up! Starting cooldown...";
   body.appendChild(bodyText);
+
+  // Add cooldown display
+  const cooldownDisplay = document.createElement("div");
+  cooldownDisplay.id = "refocus-cooldown-display";
+  cooldownDisplay.style.cssText = "font-size: 18px; font-weight: bold; margin: 10px 0; color: #dc2626;";
+  body.appendChild(cooldownDisplay);
 
   const buttons = document.createElement("div");
   buttons.className = "refocus-buttons";
-
-  // Get saved timer settings for reset button text
-  const rawHostname = window.location.hostname;
-  const cleanedHostname = cleanHostname(rawHostname);
-  const timerSettings = await getTimerForSite(cleanedHostname);
   
   const resetButton = document.createElement("button");
   resetButton.id = "refocus-reset";
   resetButton.className = "refocus-btn refocus-primary";
+  resetButton.disabled = true; // Initially disabled during cooldown
+  resetButton.style.opacity = "0.5";
   
   // Display the actual timer duration in the button
   if (timerSettings.minutes > 0) {
@@ -190,13 +231,15 @@ async function showTimeUpModal() {
     resetButton.textContent = `Reset Timer (${timerSettings.seconds}s)`;
   }
 
-  const dismissButton = document.createElement("button");
-  dismissButton.id = "refocus-dismiss";
-  dismissButton.className = "refocus-btn refocus-secondary";
-  dismissButton.textContent = "Move On";
+  const adjustButton = document.createElement("button");
+  adjustButton.id = "refocus-adjust";
+  adjustButton.className = "refocus-btn refocus-secondary";
+  adjustButton.textContent = "Adjust Timer";
+  adjustButton.disabled = true; // Initially disabled during cooldown
+  adjustButton.style.opacity = "0.5";
 
   buttons.appendChild(resetButton);
-  buttons.appendChild(dismissButton);
+  buttons.appendChild(adjustButton);
 
   modalContent.appendChild(header);
   modalContent.appendChild(body);
@@ -208,61 +251,236 @@ async function showTimeUpModal() {
   // Add modal to body
   document.body.appendChild(modal);
 
+  // Prevent background interaction by disabling body scroll and pointer events
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+  
+  // Prevent tabbing to background elements
+  const allElements = document.querySelectorAll('body > *:not(#refocus-modal)');
+  allElements.forEach(element => {
+    element.setAttribute('inert', '');
+    element.style.pointerEvents = 'none';
+  });
+
+  // Add keyboard event listeners to prevent modal dismissal
+  modalKeydownHandler = (e) => {
+    // Prevent escape key from closing modal
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+    
+    // Trap focus within modal
+    if (e.key === 'Tab') {
+      const focusableElements = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      
+      if (e.shiftKey && document.activeElement === firstFocusable) {
+        e.preventDefault();
+        lastFocusable.focus();
+      } else if (!e.shiftKey && document.activeElement === lastFocusable) {
+        e.preventDefault();
+        firstFocusable.focus();
+      }
+    }
+  };
+  
+  // Add event listener for keyboard interactions
+  document.addEventListener('keydown', modalKeydownHandler, true);
+
+  // Start cooldown countdown
+  updateCooldownDisplay(cleanedHostname);
+
   // Add event listeners
-  document
-    .getElementById("refocus-reset")
-    .addEventListener("click", async () => {
-      // Use saved timer settings instead of default
+  document.getElementById("refocus-reset").addEventListener("click", async () => {
+    console.log("Reset button clicked");
+    
+    // Check if cooldown is still active
+    const inCooldown = await isSiteInCooldown(cleanedHostname);
+    if (inCooldown) {
+      console.log("Still in cooldown, not resetting");
+      return; // Don't allow reset during cooldown
+    }
+
+    try {
+      // Use saved timer settings to reset
       const duration = (timerSettings.minutes * 60 + timerSettings.seconds) * 1000;
-      const endTime = Date.now() + duration;
 
-      // Save new timer state using cleaned hostname
-      await chrome.storage.local.set({
-        [cleanedHostname]: {
-          isActive: true,
-          endTime: endTime,
-          totalMs: duration,
-        },
+      // Send message to background script to start timer (same as popup does)
+      const response = await chrome.runtime.sendMessage({
+        type: "START_TIMER",
+        hostname: cleanedHostname,
+        duration: duration,
       });
 
-      // Create new alarm
-      await chrome.alarms.create(`timer_${cleanedHostname}`, {
-        when: endTime,
+      if (response && response.success) {
+        console.log("Timer reset successfully via background script, closing modal");
+      } else {
+        console.error("Failed to reset timer via background script");
+      }
+      restoreBackgroundInteraction();
+      
+      // Use both the variable reference and DOM query to ensure removal
+      if (modal && modal.parentNode) {
+        modal.remove();
+        console.log("Modal removed via variable reference");
+      }
+      
+      // Also try removing by ID as fallback
+      const modalById = document.getElementById("refocus-modal");
+      if (modalById) {
+        modalById.remove();
+        console.log("Modal removed via ID query");
+      }
+    } catch (error) {
+      console.error("Error resetting timer:", error);
+      // Still try to close modal even if timer reset fails
+      restoreBackgroundInteraction();
+      
+      // Try both removal methods in error case too
+      if (modal && modal.parentNode) {
+        modal.remove();
+      }
+      const modalById = document.getElementById("refocus-modal");
+      if (modalById) {
+        modalById.remove();
+      }
+    }
+  });
+
+  document.getElementById("refocus-adjust").addEventListener("click", async () => {
+    // Check if cooldown is still active
+    const inCooldown = await isSiteInCooldown(cleanedHostname);
+    if (inCooldown) {
+      return; // Don't allow adjust during cooldown
+    }
+
+    // Send message to background script to open popup
+    try {
+      await chrome.runtime.sendMessage({
+        type: "OPEN_POPUP"
       });
+    } catch (error) {
+      console.error("Failed to open popup:", error);
+    }
 
-      modal.remove();
-    });
-
-  document.getElementById("refocus-dismiss").addEventListener("click", () => {
+    // Close modal after opening popup
+    restoreBackgroundInteraction();
     modal.remove();
   });
 
-  // Allow clicking overlay to dismiss
-  modal.querySelector(".refocus-overlay").addEventListener("click", (e) => {
-    if (e.target === e.currentTarget) {
-      modal.remove();
-    }
-  });
+  // No dismiss functionality - modal cannot be closed until cooldown is over
+  // Remove all event listeners that would allow closing the modal
+}
 
-  // Handle escape key
-  const handleEscape = (e) => {
-    if (e.key === "Escape") {
-      modal.remove();
-      document.removeEventListener("keydown", handleEscape);
-    }
-  };
-  document.addEventListener("keydown", handleEscape);
+// Update cooldown display in real-time
+async function updateCooldownDisplay(hostname) {
+  const cooldownKey = `cooldown_${hostname}`;
+  const bodyText = document.getElementById("refocus-body-text");
+  const cooldownDisplay = document.getElementById("refocus-cooldown-display");
+  const resetButton = document.getElementById("refocus-reset");
+  const adjustButton = document.getElementById("refocus-adjust");
+  
+  if (!cooldownDisplay || !bodyText || !resetButton || !adjustButton) {
+    return; // Modal was closed
+  }
+
+  const result = await chrome.storage.local.get([cooldownKey]);
+  const cooldownData = result[cooldownKey];
+  
+  if (!cooldownData || !cooldownData.endTime) {
+    // No cooldown active
+    bodyText.textContent = "Your time is up! You can now reset the timer or adjust settings.";
+    cooldownDisplay.textContent = "";
+    resetButton.disabled = false;
+    resetButton.style.opacity = "1";
+    adjustButton.disabled = false;
+    adjustButton.style.opacity = "1";
+    resetButton.focus(); // Focus the reset button when it becomes available
+    return;
+  }
+
+  const remaining = cooldownData.endTime - Date.now();
+  
+  if (remaining <= 0) {
+    // Cooldown finished - user must make a choice
+    bodyText.textContent = "Cooldown complete! Please choose: reset the timer with current settings or adjust timer settings.";
+    cooldownDisplay.textContent = "";
+    resetButton.disabled = false;
+    resetButton.style.opacity = "1";
+    adjustButton.disabled = false;
+    adjustButton.style.opacity = "1";
+    resetButton.focus(); // Focus the reset button when cooldown completes
+    
+    // Clean up cooldown storage
+    await chrome.storage.local.remove(cooldownKey);
+    return;
+  }
+
+  // Cooldown still active
+  const seconds = Math.ceil(remaining / 1000);
+  bodyText.textContent = "Your time is up! Please wait for the cooldown to finish.";
+  cooldownDisplay.textContent = `Cooldown: ${seconds}s`;
+  resetButton.disabled = true;
+  resetButton.style.opacity = "0.5";
+  adjustButton.disabled = true;
+  adjustButton.style.opacity = "0.5";
+
+  // Continue updating every second
+  setTimeout(() => updateCooldownDisplay(hostname), 1000);
 }
 
 // Storage keys
 const SITES_LIST_KEY = "refocus_sites_list";
 const TIMER_SETTINGS_KEY = "refocus_timer_settings";
+const COOLDOWN_SETTINGS_KEY = "refocus_cooldown_settings";
 
 // Get saved timer values for a site (or defaults)
 async function getTimerForSite(hostname) {
   const result = await chrome.storage.local.get([TIMER_SETTINGS_KEY]);
   const settings = result[TIMER_SETTINGS_KEY] || {};
   return settings[hostname] || { minutes: 0, seconds: 4 };
+}
+
+// Get saved cooldown values for a site (or defaults)
+async function getCooldownForSite(hostname) {
+  const result = await chrome.storage.local.get([COOLDOWN_SETTINGS_KEY]);
+  const settings = result[COOLDOWN_SETTINGS_KEY] || {};
+  return settings[hostname] || { minutes: 0, seconds: 15 };
+}
+
+// Check if site is in cooldown
+async function isSiteInCooldown(hostname) {
+  const cooldownKey = `cooldown_${hostname}`;
+  const result = await chrome.storage.local.get([cooldownKey]);
+  const cooldownData = result[cooldownKey];
+  
+  if (!cooldownData || !cooldownData.endTime) {
+    return false;
+  }
+  
+  const now = Date.now();
+  return now < cooldownData.endTime;
+}
+
+// Start cooldown for a site
+async function startCooldown(hostname) {
+  const cooldownSettings = await getCooldownForSite(hostname);
+  const cooldownMs = (cooldownSettings.minutes * 60 + cooldownSettings.seconds) * 1000;
+  const endTime = Date.now() + cooldownMs;
+  
+  const cooldownKey = `cooldown_${hostname}`;
+  await chrome.storage.local.set({
+    [cooldownKey]: {
+      isActive: true,
+      endTime: endTime,
+      totalMs: cooldownMs,
+    },
+  });
+  
+  console.log(`Started cooldown for ${hostname}, duration: ${cooldownMs}ms`);
 }
 
 // Check if current site is in managed sites list
@@ -287,6 +505,13 @@ async function startAutomaticTimer() {
   const result = await chrome.storage.local.get([cleanedHostname]);
   if (result[cleanedHostname] && result[cleanedHostname].isActive) {
     console.log("Timer already active for", cleanedHostname);
+    return;
+  }
+
+  // Check if site is in cooldown
+  const inCooldown = await isSiteInCooldown(cleanedHostname);
+  if (inCooldown) {
+    console.log("Site is in cooldown, not starting timer for", cleanedHostname);
     return;
   }
 
@@ -340,6 +565,14 @@ window.addEventListener("load", async () => {
   const hostname = window.location.hostname;
   const cleanedHostname = cleanHostname(hostname);
   console.log("Page loaded - checking timer for:", cleanedHostname);
+
+  // First check if there's an active cooldown
+  const inCooldown = await isSiteInCooldown(cleanedHostname);
+  if (inCooldown) {
+    console.log("Site is in cooldown, showing modal");
+    showTimeUpModal().catch(console.error);
+    return; // Don't check for timers or start new ones during cooldown
+  }
 
   const result = await chrome.storage.local.get([cleanedHostname]);
   const siteData = result[cleanedHostname];

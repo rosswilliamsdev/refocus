@@ -3,7 +3,7 @@
   "name": "reFocus",
   "version": "1.0",
   "description": "Regain control of your attention with mindful browsing timers",
-  "permissions": ["activeTab", "storage", "alarms", "tabs"],
+  "permissions": ["activeTab", "storage", "alarms", "tabs", "scripting"],
   "background": {
     "service_worker": "background.js"
   },
@@ -16,5 +16,11 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "reFocus"
+  },
+  "icons": {
+    "16": "icons/bullseye16px.png",
+    "32": "icons/bullseye32px.png",
+    "48": "icons/bullseye48px.png",
+    "128": "icons/bullseye128px.png"
   }
 }

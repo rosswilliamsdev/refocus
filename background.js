@@ -1,18 +1,18 @@
 // Clean hostname to remove protocols, www, etc.
 function cleanHostname(input) {
   let hostname = input.trim().toLowerCase();
-  
+
   // Remove protocol if present
-  hostname = hostname.replace(/^https?:\/\//, '');
-  
+  hostname = hostname.replace(/^https?:\/\//, "");
+
   // Remove www. if present
-  hostname = hostname.replace(/^www\./, '');
-  
+  hostname = hostname.replace(/^www\./, "");
+
   // Remove path, query params, etc.
-  hostname = hostname.split('/')[0];
-  hostname = hostname.split('?')[0];
-  hostname = hostname.split('#')[0];
-  
+  hostname = hostname.split("/")[0];
+  hostname = hostname.split("?")[0];
+  hostname = hostname.split("#")[0];
+
   return hostname;
 }
 
@@ -37,7 +37,12 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         when: endTime,
       });
 
-      console.log("Background: Started timer for", hostname, "duration:", duration + "ms");
+      console.log(
+        "Background: Started timer for",
+        hostname,
+        "duration:",
+        duration + "ms"
+      );
       sendResponse({ success: true });
     } catch (error) {
       console.error("Background: Failed to start timer:", error);
@@ -52,7 +57,7 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     try {
       // Clear alarm
       await chrome.alarms.clear(`timer_${hostname}`);
-      
+
       // Remove storage
       await chrome.storage.local.remove(hostname);
 
@@ -64,12 +69,31 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
     return true; // Keep message channel open for async response
   }
+
+  if (message.type === "OPEN_POPUP") {
+    try {
+      // Open the extension popup by programmatically opening the action popup
+      await chrome.action.openPopup();
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error("Background: Failed to open popup:", error);
+      // Fallback: open the popup in a new tab if direct popup opening fails
+      try {
+        await chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
+        sendResponse({ success: true, fallback: true });
+      } catch (fallbackError) {
+        console.error("Background: Fallback also failed:", fallbackError);
+        sendResponse({ success: false, error: fallbackError.message });
+      }
+    }
+    return true; // Keep message channel open for async response
+  }
 });
 
 // Handle alarm events
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   console.log("Alarm triggered:", alarm.name);
-  
+
   if (alarm.name.startsWith("timer_")) {
     const hostname = alarm.name.replace("timer_", "");
     console.log("Timer expired for hostname:", hostname);
@@ -78,18 +102,19 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       // Get all tabs and filter by hostname
       const allTabs = await chrome.tabs.query({});
       console.log("Total tabs:", allTabs.length);
-      
-      const matchingTabs = allTabs.filter(tab => {
+
+      const matchingTabs = allTabs.filter((tab) => {
         if (!tab.url) return false;
         try {
           const tabUrl = new URL(tab.url);
           const cleanedTabHostname = cleanHostname(tabUrl.hostname);
           const cleanedStoredHostname = cleanHostname(hostname);
-          
-          const matches = cleanedTabHostname === cleanedStoredHostname || 
-                         cleanedTabHostname.includes(cleanedStoredHostname) || 
-                         cleanedStoredHostname.includes(cleanedTabHostname);
-          
+
+          const matches =
+            cleanedTabHostname === cleanedStoredHostname ||
+            cleanedTabHostname.includes(cleanedStoredHostname) ||
+            cleanedStoredHostname.includes(cleanedTabHostname);
+
           if (matches) {
             console.log("Found matching tab:", tab.id, tab.url);
           }
@@ -105,10 +130,33 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       for (const tab of matchingTabs) {
         try {
           console.log("Sending TIMER_EXPIRED message to tab:", tab.id);
-          const response = await chrome.tabs.sendMessage(tab.id, { type: "TIMER_EXPIRED" });
+          const response = await chrome.tabs.sendMessage(tab.id, {
+            type: "TIMER_EXPIRED",
+          });
           console.log("Message response:", response);
         } catch (error) {
           console.log(`Could not send message to tab ${tab.id}:`, error);
+          // If content script isn't ready, try injecting it
+          try {
+            console.log(
+              "Attempting to inject content script into tab:",
+              tab.id
+            );
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ["content.js"],
+            });
+            // Try sending message again after injection
+            const retryResponse = await chrome.tabs.sendMessage(tab.id, {
+              type: "TIMER_EXPIRED",
+            });
+            console.log("Retry message response:", retryResponse);
+          } catch (injectionError) {
+            console.log(
+              `Failed to inject content script or send message to tab ${tab.id}:`,
+              injectionError
+            );
+          }
         }
       }
     } catch (error) {

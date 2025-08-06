@@ -2,13 +2,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const manualSiteInput = document.getElementById("manualSiteInput");
   const addManualSiteBtn = document.getElementById("addManualSite");
   const sitesContainer = document.getElementById("sitesContainer");
-  const saveAllBtn = document.getElementById("saveAllBtn");
+  // const saveAllBtn = document.getElementById("saveAllBtn"); // Removed button
 
   let siteTimers = {}; // Store timer intervals for each site
 
   // Storage keys
   const SITES_LIST_KEY = "refocus_sites_list";
   const TIMER_SETTINGS_KEY = "refocus_timer_settings";
+  const COOLDOWN_SETTINGS_KEY = "refocus_cooldown_settings";
 
   // Load sites list from storage
   async function loadSitesList() {
@@ -68,6 +69,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     const settings = await loadTimerSettings();
     const result = settings[hostname] || { minutes: 0, seconds: 4 };
     console.log('Loading timer for site:', hostname, 'result:', JSON.stringify(result), 'from settings:', JSON.stringify(settings));
+    return result;
+  }
+
+  // Load cooldown settings from storage
+  async function loadCooldownSettings() {
+    const result = await chrome.storage.local.get([COOLDOWN_SETTINGS_KEY]);
+    return result[COOLDOWN_SETTINGS_KEY] || {};
+  }
+
+  // Save cooldown settings to storage
+  async function saveCooldownSettings(settings) {
+    console.log('About to save cooldown settings to storage:', JSON.stringify(settings));
+    try {
+      await chrome.storage.local.set({ [COOLDOWN_SETTINGS_KEY]: settings });
+      console.log('Successfully saved cooldown settings to storage');
+      
+      // Verify it was saved
+      const verification = await chrome.storage.local.get([COOLDOWN_SETTINGS_KEY]);
+      console.log('Verification - cooldown settings actually saved:', JSON.stringify(verification));
+    } catch (error) {
+      console.error('Error saving cooldown settings:', error);
+    }
+  }
+
+  // Save cooldown values for a specific site
+  async function saveCooldownForSite(hostname, minutes, seconds) {
+    console.log('Saving cooldown for site:', hostname, 'values:', { minutes, seconds });
+    const settings = await loadCooldownSettings();
+    settings[hostname] = { minutes, seconds };
+    await saveCooldownSettings(settings);
+    console.log('Updated cooldown settings:', JSON.stringify(settings));
+  }
+
+  // Get saved cooldown values for a site (or defaults)
+  async function getCooldownForSite(hostname) {
+    const settings = await loadCooldownSettings();
+    const result = settings[hostname] || { minutes: 0, seconds: 15 };
+    console.log('Loading cooldown for site:', hostname, 'result:', JSON.stringify(result), 'from settings:', JSON.stringify(settings));
     return result;
   }
 
@@ -236,8 +275,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? Math.max(0, timerData.endTime - Date.now())
       : 0;
 
-    // Get saved timer values for this site
+    // Get saved timer and cooldown values for this site
     const savedTimer = await getTimerForSite(hostname);
+    const savedCooldown = await getCooldownForSite(hostname);
 
     const siteEl = document.createElement("div");
     siteEl.className = "site-item";
@@ -265,11 +305,23 @@ document.addEventListener("DOMContentLoaded", async () => {
           <div class="site-status">Timer active</div>
         `
             : `
-          <div class="timer-input-row">
-            <label>Min:</label>
-            <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
-            <label>Sec:</label>
-            <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
+          <div class="timer-section">
+            <div class="timer-label"><strong>Timer</strong></div>
+            <div class="timer-input-row">
+              <label>Min:</label>
+              <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
+              <label>Sec:</label>
+              <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
+            </div>
+          </div>
+          <div class="timer-section">
+            <div class="timer-label"><strong>Cooldown</strong></div>
+            <div class="timer-input-row">
+              <label>Min:</label>
+              <input type="number" id="cooldown-minutes-${hostname}" min="0" max="999" value="${savedCooldown.minutes}" />
+              <label>Sec:</label>
+              <input type="number" id="cooldown-seconds-${hostname}" min="0" max="59" value="${savedCooldown.seconds}" />
+            </div>
           </div>
           <div class="timer-controls">
             <button class="start-btn" data-hostname="${hostname}">Start Timer</button>
@@ -347,8 +399,20 @@ document.addEventListener("DOMContentLoaded", async () => {
           const minutes = parseInt(minutesEl.value) || 0;
           const seconds = parseInt(secondsEl.value) || 0;
           await saveTimerForSite(hostname, minutes, seconds);
-          showTemporaryMessage(`Settings saved for ${hostname}!`);
         }
+        
+        const cooldownMinutesEl = document.getElementById(`cooldown-minutes-${hostname}`);
+        const cooldownSecondsEl = document.getElementById(`cooldown-seconds-${hostname}`);
+        
+        if (cooldownMinutesEl && cooldownSecondsEl) {
+          // Get current saved values to use as fallback
+          const currentCooldown = await getCooldownForSite(hostname);
+          const cooldownMinutes = parseInt(cooldownMinutesEl.value) || currentCooldown.minutes;
+          const cooldownSeconds = parseInt(cooldownSecondsEl.value) || currentCooldown.seconds;
+          await saveCooldownForSite(hostname, cooldownMinutes, cooldownSeconds);
+        }
+        
+        showTemporaryMessage(`Settings saved for ${hostname}!`);
       });
     }
 
@@ -410,7 +474,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 2000);
   }
 
-  // Save all timer settings
+  // Save all timer and cooldown settings
   async function saveAllSettings() {
     const minutesInputs = document.querySelectorAll('input[id^="minutes-"]');
     
@@ -420,15 +484,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       const hostname = minutesInput.id.replace('minutes-', '');
       const secondsInput = document.getElementById(`seconds-${hostname}`);
       
+      // Save timer settings
       if (secondsInput) {
         const minutes = parseInt(minutesInput.value) || 0;
         const seconds = parseInt(secondsInput.value) || 0;
         await saveTimerForSite(hostname, minutes, seconds);
-        savedCount++;
       }
+      
+      // Save cooldown settings
+      const cooldownMinutesInput = document.getElementById(`cooldown-minutes-${hostname}`);
+      const cooldownSecondsInput = document.getElementById(`cooldown-seconds-${hostname}`);
+      
+      if (cooldownMinutesInput && cooldownSecondsInput) {
+        // Get current saved values to use as fallback
+        const currentCooldown = await getCooldownForSite(hostname);
+        const cooldownMinutes = parseInt(cooldownMinutesInput.value) || currentCooldown.minutes;
+        const cooldownSeconds = parseInt(cooldownSecondsInput.value) || currentCooldown.seconds;
+        await saveCooldownForSite(hostname, cooldownMinutes, cooldownSeconds);
+      }
+      
+      savedCount++;
     }
     
-    showTemporaryMessage(`Saved settings for ${savedCount} sites!`);
+    showTemporaryMessage(`Saved timer and cooldown settings for ${savedCount} sites!`);
   }
 
   // Event listeners
@@ -443,9 +521,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     manualSiteInput.value = "";
   });
 
-  saveAllBtn.addEventListener("click", async () => {
-    await saveAllSettings();
-  });
+  // saveAllBtn.addEventListener("click", async () => {
+  //   await saveAllSettings();
+  // }); // Removed save all button functionality
 
   // Allow Enter key to add manual site
   manualSiteInput.addEventListener("keypress", (e) => {

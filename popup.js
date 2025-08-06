@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Storage keys
   const SITES_LIST_KEY = "refocus_sites_list";
   const TIMER_SETTINGS_KEY = "refocus_timer_settings";
+  const COOLDOWN_SETTINGS_KEY = "refocus_cooldown_settings";
 
   // Get current active tab's hostname
   async function getCurrentSite() {
@@ -68,18 +69,66 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Save timer values for a specific site
   async function saveTimerForSite(hostname, minutes, seconds) {
-    console.log('Popup - Saving timer for site:', hostname, 'values:', { minutes, seconds });
+    console.log("Popup - Saving timer for site:", hostname, "values:", {
+      minutes,
+      seconds,
+    });
     const settings = await loadTimerSettings();
     settings[hostname] = { minutes, seconds };
     await saveTimerSettings(settings);
-    console.log('Popup - Updated settings:', settings);
+    console.log("Popup - Updated settings:", settings);
   }
 
   // Get saved timer values for a site (or defaults)
   async function getTimerForSite(hostname) {
     const settings = await loadTimerSettings();
     const result = settings[hostname] || { minutes: 0, seconds: 4 };
-    console.log('Popup - Loading timer for site:', hostname, 'result:', result, 'from settings:', settings);
+    console.log(
+      "Popup - Loading timer for site:",
+      hostname,
+      "result:",
+      result,
+      "from settings:",
+      settings
+    );
+    return result;
+  }
+
+  // Load cooldown settings from storage
+  async function loadCooldownSettings() {
+    const result = await chrome.storage.local.get([COOLDOWN_SETTINGS_KEY]);
+    return result[COOLDOWN_SETTINGS_KEY] || {};
+  }
+
+  // Save cooldown settings to storage
+  async function saveCooldownSettings(settings) {
+    await chrome.storage.local.set({ [COOLDOWN_SETTINGS_KEY]: settings });
+  }
+
+  // Save cooldown values for a specific site
+  async function saveCooldownForSite(hostname, minutes, seconds) {
+    console.log("Popup - Saving cooldown for site:", hostname, "values:", {
+      minutes,
+      seconds,
+    });
+    const settings = await loadCooldownSettings();
+    settings[hostname] = { minutes, seconds };
+    await saveCooldownSettings(settings);
+    console.log("Popup - Updated cooldown settings:", settings);
+  }
+
+  // Get saved cooldown values for a site (or defaults)
+  async function getCooldownForSite(hostname) {
+    const settings = await loadCooldownSettings();
+    const result = settings[hostname] || { minutes: 0, seconds: 15 };
+    console.log(
+      "Popup - Loading cooldown for site:",
+      hostname,
+      "result:",
+      result,
+      "from settings:",
+      settings
+    );
     return result;
   }
 
@@ -100,7 +149,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     sites.push({ hostname, timerData: null });
     await saveSitesList(sites);
-    await renderCurrentSiteTimer();
+    await renderCurrentSiteTimer(true); // Force render after adding site
     showTemporaryMessage("Site added!");
   }
 
@@ -143,7 +192,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       when: endTime,
     });
 
-    await renderCurrentSiteTimer();
+    await renderCurrentSiteTimer(true); // Force render after timer state changes
   }
 
   // Stop timer for a site
@@ -160,7 +209,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       delete siteTimers[hostname];
     }
 
-    await renderCurrentSiteTimer();
+    await renderCurrentSiteTimer(true); // Force render after timer state changes
   }
 
   // Reset timer for a site
@@ -223,21 +272,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Remove site from the list
   async function removeSite(hostname) {
     const sites = await loadSitesList();
-    const filteredSites = sites.filter(site => site.hostname !== hostname);
-    
+    const filteredSites = sites.filter((site) => site.hostname !== hostname);
+
     await saveSitesList(filteredSites);
-    
+
     // Clear any active timer and storage for this site
     await chrome.alarms.clear(`timer_${hostname}`);
     await chrome.storage.local.remove(hostname);
-    
+
     // Clear timer interval if running
     if (siteTimers[hostname]) {
       clearInterval(siteTimers[hostname]);
       delete siteTimers[hostname];
     }
-    
-    await renderCurrentSiteTimer();
+
+    await renderCurrentSiteTimer(true); // Force render after timer state changes
   }
 
   // Render a single site item
@@ -248,8 +297,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? Math.max(0, timerData.endTime - Date.now())
       : 0;
 
-    // Get saved timer values for this site
+    // Get saved timer and cooldown values for this site
     const savedTimer = await getTimerForSite(hostname);
+    const savedCooldown = await getCooldownForSite(hostname);
 
     const siteEl = document.createElement("div");
     siteEl.className = "site-item";
@@ -277,11 +327,23 @@ document.addEventListener("DOMContentLoaded", async () => {
           <div class="site-status">Timer active</div>
         `
             : `
-          <div class="timer-input-row">
-            <label>Min:</label>
-            <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
-            <label>Sec:</label>
-            <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
+          <div class="timer-section">
+            <div class="timer-label"><strong>Timer</strong></div>
+            <div class="timer-input-row">
+              <label>Min:</label>
+              <input type="number" id="minutes-${hostname}" min="0" max="999" value="${savedTimer.minutes}" />
+              <label>Sec:</label>
+              <input type="number" id="seconds-${hostname}" min="0" max="59" value="${savedTimer.seconds}" />
+            </div>
+          </div>
+          <div class="timer-section">
+            <div class="timer-label"><strong>Cooldown</strong></div>
+            <div class="timer-input-row">
+              <label>Min:</label>
+              <input type="number" id="cooldown-minutes-${hostname}" min="0" max="999" value="${savedCooldown.minutes}" />
+              <label>Sec:</label>
+              <input type="number" id="cooldown-seconds-${hostname}" min="0" max="59" value="${savedCooldown.seconds}" />
+            </div>
           </div>
           <div class="timer-controls">
             <button class="start-btn" data-hostname="${hostname}">Start Timer</button>
@@ -320,7 +382,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         // Save the timer values before starting the timer
         await saveTimerForSite(hostname, minutes, seconds);
-        
+
         await startTimer(hostname, minutes, seconds);
       });
     }
@@ -344,50 +406,119 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Add save button event listener
     if (saveBtn) {
-      saveBtn.addEventListener('click', async () => {
+      saveBtn.addEventListener("click", async () => {
         const minutesEl = document.getElementById(`minutes-${hostname}`);
         const secondsEl = document.getElementById(`seconds-${hostname}`);
-        
+
         if (minutesEl && secondsEl) {
           const minutes = parseInt(minutesEl.value) || 0;
           const seconds = parseInt(secondsEl.value) || 0;
           await saveTimerForSite(hostname, minutes, seconds);
-          showTemporaryMessage(`Settings saved for ${hostname}!`);
         }
+
+        const cooldownMinutesEl = document.getElementById(
+          `cooldown-minutes-${hostname}`
+        );
+        const cooldownSecondsEl = document.getElementById(
+          `cooldown-seconds-${hostname}`
+        );
+
+        if (cooldownMinutesEl && cooldownSecondsEl) {
+          // Get current saved values to use as fallback
+          const currentCooldown = await getCooldownForSite(hostname);
+          const cooldownMinutes =
+            parseInt(cooldownMinutesEl.value) || currentCooldown.minutes;
+          const cooldownSeconds =
+            parseInt(cooldownSecondsEl.value) || currentCooldown.seconds;
+          await saveCooldownForSite(hostname, cooldownMinutes, cooldownSeconds);
+        }
+
+        showTemporaryMessage(`Settings saved for ${hostname}!`);
       });
     }
 
     return siteEl;
   }
 
-  // Preserve input values before re-rendering
+  // Preserve input values and focus state before re-rendering
   function preserveCurrentSiteInputValues() {
     const inputValues = {};
-    const minutesInput = currentSiteTimer.querySelector('input[id^="minutes-"]');
-    const secondsInput = currentSiteTimer.querySelector('input[id^="seconds-"]');
-    
+    let focusedElementId = null;
+    let cursorPosition = null;
+
+    // Capture which element has focus and cursor position
+    if (document.activeElement && document.activeElement.tagName === "INPUT") {
+      focusedElementId = document.activeElement.id;
+      cursorPosition = document.activeElement.selectionStart;
+    }
+
+    const minutesInput = currentSiteTimer.querySelector(
+      'input[id^="minutes-"]'
+    );
+    const secondsInput = currentSiteTimer.querySelector(
+      'input[id^="seconds-"]'
+    );
+    const cooldownMinutesInput = currentSiteTimer.querySelector(
+      'input[id^="cooldown-minutes-"]'
+    );
+    const cooldownSecondsInput = currentSiteTimer.querySelector(
+      'input[id^="cooldown-seconds-"]'
+    );
+
     if (minutesInput) {
       inputValues[minutesInput.id] = minutesInput.value;
     }
     if (secondsInput) {
       inputValues[secondsInput.id] = secondsInput.value;
     }
-    
-    return inputValues;
+    if (cooldownMinutesInput) {
+      inputValues[cooldownMinutesInput.id] = cooldownMinutesInput.value;
+    }
+    if (cooldownSecondsInput) {
+      inputValues[cooldownSecondsInput.id] = cooldownSecondsInput.value;
+    }
+
+    return { inputValues, focusedElementId, cursorPosition };
   }
 
-  // Restore input values after re-rendering
-  function restoreCurrentSiteInputValues(inputValues) {
-    Object.keys(inputValues).forEach(inputId => {
+  // Restore input values and focus state after re-rendering
+  function restoreCurrentSiteInputValues(preservedState) {
+    if (!preservedState) return;
+
+    const { inputValues, focusedElementId, cursorPosition } = preservedState;
+
+    // Restore input values
+    Object.keys(inputValues).forEach((inputId) => {
       const input = document.getElementById(inputId);
       if (input) {
         input.value = inputValues[inputId];
       }
     });
+
+    // Restore focus and cursor position
+    if (focusedElementId) {
+      const focusedElement = document.getElementById(focusedElementId);
+      if (focusedElement) {
+        focusedElement.focus();
+        if (cursorPosition !== null) {
+          focusedElement.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      }
+    }
+  }
+
+  // Check if user is currently editing inputs
+  function isUserEditingInputs() {
+    const activeElement = document.activeElement;
+    return (
+      activeElement &&
+      activeElement.tagName === "INPUT" &&
+      currentSiteTimer.contains(activeElement)
+    );
   }
 
   // Render current site timer
-  async function renderCurrentSiteTimer() {
+  async function renderCurrentSiteTimer(forceRender = false) {
     if (!currentHostname) {
       currentSiteTimer.innerHTML =
         '<div class="no-current-site">Navigate to a website to see timer controls</div>';
@@ -395,16 +526,22 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    // Don't re-render if user is actively editing inputs (unless forced)
+    if (!forceRender && isUserEditingInputs()) {
+      return;
+    }
+
     const sites = await loadSitesList();
     const cleanedCurrentHostname = cleanHostname(currentHostname);
-    const currentSite = sites.find((site) => 
-      site.hostname === cleanedCurrentHostname || 
-      cleanedCurrentHostname.includes(site.hostname) || 
-      site.hostname.includes(cleanedCurrentHostname)
+    const currentSite = sites.find(
+      (site) =>
+        site.hostname === cleanedCurrentHostname ||
+        cleanedCurrentHostname.includes(site.hostname) ||
+        site.hostname.includes(cleanedCurrentHostname)
     );
 
-    // Preserve current input values before clearing
-    const inputValues = preserveCurrentSiteInputValues();
+    // Preserve current input values and focus before clearing
+    const preservedState = preserveCurrentSiteInputValues();
 
     // Clear existing timer interval for current site
     if (siteTimers[currentHostname]) {
@@ -425,9 +562,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentSiteTimer.innerHTML = "";
     currentSiteTimer.appendChild(siteEl);
 
-    // Restore input values after rendering (but only if timer is not active)
+    // Restore input values and focus after rendering (but only if timer is not active)
     if (!currentSite.timerData || !currentSite.timerData.isActive) {
-      restoreCurrentSiteInputValues(inputValues);
+      restoreCurrentSiteInputValues(preservedState);
     }
 
     // Start countdown if timer is active
@@ -481,6 +618,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Update current site info periodically
   setInterval(async () => {
     await getCurrentSite();
-    await renderCurrentSiteTimer();
+    await renderCurrentSiteTimer(true); // Force render after timer state changes
   }, 1000);
 });
