@@ -67,7 +67,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Get saved timer values for a site (or defaults)
   async function getTimerForSite(hostname) {
     const settings = await loadTimerSettings();
-    const result = settings[hostname] || { minutes: 0, seconds: 4 };
+    const result = settings[hostname] || { minutes: 5, seconds: 0 };
     console.log('Loading timer for site:', hostname, 'result:', JSON.stringify(result), 'from settings:', JSON.stringify(settings));
     return result;
   }
@@ -105,7 +105,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Get saved cooldown values for a site (or defaults)
   async function getCooldownForSite(hostname) {
     const settings = await loadCooldownSettings();
-    const result = settings[hostname] || { minutes: 0, seconds: 15 };
+    const result = settings[hostname] || { minutes: 0, seconds: 20 };
     console.log('Loading cooldown for site:', hostname, 'result:', JSON.stringify(result), 'from settings:', JSON.stringify(settings));
     return result;
   }
@@ -174,47 +174,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     const totalMs = (minutes * 60 + seconds) * 1000;
     if (totalMs <= 0) return;
 
-    const endTime = Date.now() + totalMs;
-
-    // Save timer state
-    await chrome.storage.local.set({
-      [hostname]: {
-        isActive: true,
-        endTime: endTime,
-        totalMs: totalMs,
-      },
-    });
-
-    // Create alarm
-    await chrome.alarms.create(`timer_${hostname}`, {
-      when: endTime,
-    });
-
-    await renderSitesList();
-  }
-
-  // Stop timer for a site
-  async function stopTimer(hostname) {
-    // Clear alarm
-    await chrome.alarms.clear(`timer_${hostname}`);
-
-    // Remove storage
-    await chrome.storage.local.remove(hostname);
-
-    // Clear timer interval
-    if (siteTimers[hostname]) {
-      clearInterval(siteTimers[hostname]);
-      delete siteTimers[hostname];
+    // Send message to background script to start timer (using new pause/resume system)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "START_TIMER",
+        hostname: hostname,
+        duration: totalMs,
+      });
+      
+      if (response && response.success) {
+        console.log("Timer started via background script");
+      } else {
+        console.error("Failed to start timer via background script");
+      }
+    } catch (error) {
+      console.error("Error starting timer:", error);
     }
 
     await renderSitesList();
   }
 
-  // Reset timer for a site
-  async function resetTimer(hostname, minutes, seconds) {
-    await stopTimer(hostname);
-    await startTimer(hostname, minutes, seconds);
-  }
+
 
   // Update timer display for a site
   function updateTimerDisplay(hostname, remainingMs) {
@@ -249,7 +229,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       const siteData = result[hostname];
 
       if (siteData && siteData.isActive) {
-        const remaining = siteData.endTime - Date.now();
+        // Use remainingMs from new timer structure, accounting for elapsed time if not paused
+        let remaining = siteData.remainingMs;
+        
+        if (!siteData.isPaused && siteData.lastUpdate) {
+          const elapsed = Date.now() - siteData.lastUpdate;
+          remaining = Math.max(0, remaining - elapsed);
+        }
+        
         if (remaining > 0) {
           updateTimerDisplay(hostname, remaining);
         } else {
@@ -271,9 +258,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function createSiteElement(site) {
     const { hostname, timerData } = site;
     const isActive = timerData && timerData.isActive;
-    const remainingMs = isActive
-      ? Math.max(0, timerData.endTime - Date.now())
-      : 0;
+    let remainingMs = 0;
+    
+    if (isActive) {
+      remainingMs = timerData.remainingMs || 0;
+      // Account for elapsed time if not paused
+      if (!timerData.isPaused && timerData.lastUpdate) {
+        const elapsed = Date.now() - timerData.lastUpdate;
+        remainingMs = Math.max(0, remainingMs - elapsed);
+      }
+    }
 
     // Get saved timer and cooldown values for this site
     const savedTimer = await getTimerForSite(hostname);
@@ -284,7 +278,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     siteEl.innerHTML = `
       <div class="site-header">
         <div class="site-name">${hostname}</div>
-        <button class="remove-site" data-hostname="${hostname}">Remove</button>
+        <button class="remove-site" data-hostname="${hostname}" ${isActive && remainingMs > 0 ? 'disabled title="Cannot remove site while timer is active"' : ''}>Remove</button>
       </div>
       
       <div class="site-timer">
@@ -297,10 +291,6 @@ document.addEventListener("DOMContentLoaded", async () => {
               )
                 .toString()
                 .padStart(2, "0")}
-          </div>
-          <div class="timer-controls">
-            <button class="stop-btn" data-hostname="${hostname}">Stop</button>
-            <button class="reset-btn" data-hostname="${hostname}">Reset</button>
           </div>
           <div class="site-status">Timer active</div>
         `
@@ -335,12 +325,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Add event listeners to buttons
     const removeBtn = siteEl.querySelector(".remove-site");
     const startBtn = siteEl.querySelector(".start-btn");
-    const stopBtn = siteEl.querySelector(".stop-btn");
-    const resetBtn = siteEl.querySelector(".reset-btn");
     const saveBtn = siteEl.querySelector(".save-btn");
 
     if (removeBtn) {
       removeBtn.addEventListener("click", async () => {
+        if (removeBtn.disabled) {
+          return; // Don't allow removal if button is disabled
+        }
         await removeSite(hostname);
       });
     }
@@ -365,29 +356,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     }
 
-    if (stopBtn) {
-      stopBtn.addEventListener("click", async () => {
-        await stopTimer(hostname);
-      });
-    }
-
-    if (resetBtn) {
-      resetBtn.addEventListener("click", async () => {
-        const minutesEl = document.getElementById(`minutes-${hostname}`);
-        const secondsEl = document.getElementById(`seconds-${hostname}`);
-
-        // Try to get values from the current timer inputs, or default to 5 minutes
-        let minutes = 5;
-        let seconds = 0;
-
-        if (minutesEl && secondsEl) {
-          minutes = parseInt(minutesEl.value);
-          seconds = parseInt(secondsEl.value);
-        }
-
-        await resetTimer(hostname, minutes, seconds);
-      });
-    }
 
     // Add save button event listener
     if (saveBtn) {
@@ -444,7 +412,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       // Start countdown if timer is active
       if (site.timerData && site.timerData.isActive) {
-        const remaining = Math.max(0, site.timerData.endTime - Date.now());
+        let remaining = site.timerData.remainingMs || 0;
+        
+        // Account for elapsed time if not paused
+        if (!site.timerData.isPaused && site.timerData.lastUpdate) {
+          const elapsed = Date.now() - site.timerData.lastUpdate;
+          remaining = Math.max(0, remaining - elapsed);
+        }
+        
         if (remaining > 0) {
           startCountdown(site.hostname, remaining);
         }

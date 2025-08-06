@@ -20,22 +20,21 @@ function cleanHostname(input) {
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (message.type === "START_TIMER") {
     const { hostname, duration } = message;
-    const endTime = Date.now() + duration;
 
     try {
-      // Save timer state
+      // Save timer state with remaining time (not absolute end time)
       await chrome.storage.local.set({
         [hostname]: {
           isActive: true,
-          endTime: endTime,
+          isPaused: false,
+          remainingMs: duration,
           totalMs: duration,
+          lastUpdate: Date.now(),
         },
       });
 
-      // Create alarm
-      await chrome.alarms.create(`timer_${hostname}`, {
-        when: endTime,
-      });
+      // Start interval-based countdown instead of alarm
+      startTimerCountdown(hostname);
 
       console.log(
         "Background: Started timer for",
@@ -55,8 +54,8 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     const { hostname } = message;
 
     try {
-      // Clear alarm
-      await chrome.alarms.clear(`timer_${hostname}`);
+      // Clear interval if running
+      clearTimerInterval(hostname);
 
       // Remove storage
       await chrome.storage.local.remove(hostname);
@@ -65,6 +64,84 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       sendResponse({ success: true });
     } catch (error) {
       console.error("Background: Failed to stop timer:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.type === "PAUSE_TIMER") {
+    const { hostname } = message;
+
+    try {
+      const result = await chrome.storage.local.get([hostname]);
+      const timerData = result[hostname];
+
+      if (timerData && timerData.isActive && !timerData.isPaused) {
+        // Update remaining time based on how much time has passed
+        const now = Date.now();
+        const elapsed = now - timerData.lastUpdate;
+        const newRemaining = Math.max(0, timerData.remainingMs - elapsed);
+
+        await chrome.storage.local.set({
+          [hostname]: {
+            ...timerData,
+            isPaused: true,
+            remainingMs: newRemaining,
+            lastUpdate: now,
+          },
+        });
+
+        console.log(
+          "Background: Paused timer for",
+          hostname,
+          "remaining:",
+          newRemaining + "ms"
+        );
+        sendResponse({ success: true });
+      } else {
+        sendResponse({
+          success: false,
+          error: "Timer not active or already paused",
+        });
+      }
+    } catch (error) {
+      console.error("Background: Failed to pause timer:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.type === "RESUME_TIMER") {
+    const { hostname } = message;
+
+    try {
+      const result = await chrome.storage.local.get([hostname]);
+      const timerData = result[hostname];
+
+      if (timerData && timerData.isActive && timerData.isPaused) {
+        await chrome.storage.local.set({
+          [hostname]: {
+            ...timerData,
+            isPaused: false,
+            lastUpdate: Date.now(),
+          },
+        });
+
+        console.log(
+          "Background: Resumed timer for",
+          hostname,
+          "remaining:",
+          timerData.remainingMs + "ms"
+        );
+        sendResponse({ success: true });
+      } else {
+        sendResponse({
+          success: false,
+          error: "Timer not active or not paused",
+        });
+      }
+    } catch (error) {
+      console.error("Background: Failed to resume timer:", error);
       sendResponse({ success: false, error: error.message });
     }
     return true; // Keep message channel open for async response
@@ -90,81 +167,133 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   }
 });
 
-// Handle alarm events
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  console.log("Alarm triggered:", alarm.name);
+// Timer interval management
+const timerIntervals = new Map();
 
-  if (alarm.name.startsWith("timer_")) {
-    const hostname = alarm.name.replace("timer_", "");
-    console.log("Timer expired for hostname:", hostname);
+// Start interval-based countdown for a timer
+function startTimerCountdown(hostname) {
+  // Clear any existing interval
+  clearTimerInterval(hostname);
 
+  const interval = setInterval(async () => {
     try {
-      // Get all tabs and filter by hostname
-      const allTabs = await chrome.tabs.query({});
-      console.log("Total tabs:", allTabs.length);
+      const result = await chrome.storage.local.get([hostname]);
+      const timerData = result[hostname];
 
-      const matchingTabs = allTabs.filter((tab) => {
-        if (!tab.url) return false;
-        try {
-          const tabUrl = new URL(tab.url);
-          const cleanedTabHostname = cleanHostname(tabUrl.hostname);
-          const cleanedStoredHostname = cleanHostname(hostname);
+      if (!timerData || !timerData.isActive) {
+        clearTimerInterval(hostname);
+        return;
+      }
 
-          const matches =
-            cleanedTabHostname === cleanedStoredHostname ||
-            cleanedTabHostname.includes(cleanedStoredHostname) ||
-            cleanedStoredHostname.includes(cleanedTabHostname);
+      // Only count down if not paused
+      if (!timerData.isPaused) {
+        const now = Date.now();
+        const elapsed = now - timerData.lastUpdate;
+        const newRemaining = Math.max(0, timerData.remainingMs - elapsed);
 
-          if (matches) {
-            console.log("Found matching tab:", tab.id, tab.url);
-          }
-          return matches;
-        } catch {
-          return false;
-        }
-      });
-
-      console.log("Matching tabs found:", matchingTabs.length);
-
-      // Send message to all matching tabs
-      for (const tab of matchingTabs) {
-        try {
-          console.log("Sending TIMER_EXPIRED message to tab:", tab.id);
-          const response = await chrome.tabs.sendMessage(tab.id, {
-            type: "TIMER_EXPIRED",
+        if (newRemaining <= 0) {
+          // Timer expired
+          console.log("Timer expired for hostname:", hostname);
+          await handleTimerExpired(hostname);
+          clearTimerInterval(hostname);
+        } else {
+          // Update remaining time
+          await chrome.storage.local.set({
+            [hostname]: {
+              ...timerData,
+              remainingMs: newRemaining,
+              lastUpdate: now,
+            },
           });
-          console.log("Message response:", response);
-        } catch (error) {
-          console.log(`Could not send message to tab ${tab.id}:`, error);
-          // If content script isn't ready, try injecting it
-          try {
-            console.log(
-              "Attempting to inject content script into tab:",
-              tab.id
-            );
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              files: ["content.js"],
-            });
-            // Try sending message again after injection
-            const retryResponse = await chrome.tabs.sendMessage(tab.id, {
-              type: "TIMER_EXPIRED",
-            });
-            console.log("Retry message response:", retryResponse);
-          } catch (injectionError) {
-            console.log(
-              `Failed to inject content script or send message to tab ${tab.id}:`,
-              injectionError
-            );
-          }
         }
       }
     } catch (error) {
-      console.error("Error handling alarm:", error);
+      console.error("Error in timer countdown:", error);
+      clearTimerInterval(hostname);
     }
+  }, 1000); // Check every second
 
-    // Clean up storage
-    console.log("Cleaning up storage for hostname:", hostname);
-    chrome.storage.local.remove(hostname);
+  timerIntervals.set(hostname, interval);
+  console.log("Started timer countdown for", hostname);
+}
+
+// Clear timer interval
+function clearTimerInterval(hostname) {
+  const interval = timerIntervals.get(hostname);
+  if (interval) {
+    clearInterval(interval);
+    timerIntervals.delete(hostname);
+    console.log("Cleared timer interval for", hostname);
   }
-});
+}
+
+// Handle timer expiration (extracted from alarm handler)
+async function handleTimerExpired(hostname) {
+  try {
+    // Get all tabs and filter by hostname
+    const allTabs = await chrome.tabs.query({});
+    console.log("Total tabs:", allTabs.length);
+
+    const matchingTabs = allTabs.filter((tab) => {
+      if (!tab.url) return false;
+      try {
+        const tabUrl = new URL(tab.url);
+        const cleanedTabHostname = cleanHostname(tabUrl.hostname);
+        const cleanedStoredHostname = cleanHostname(hostname);
+
+        const matches =
+          cleanedTabHostname === cleanedStoredHostname ||
+          cleanedTabHostname.includes(cleanedStoredHostname) ||
+          cleanedStoredHostname.includes(cleanedTabHostname);
+
+        if (matches) {
+          console.log("Found matching tab:", tab.id, tab.url);
+        }
+        return matches;
+      } catch {
+        return false;
+      }
+    });
+
+    console.log("Matching tabs found:", matchingTabs.length);
+
+    // Send message to all matching tabs
+    for (const tab of matchingTabs) {
+      try {
+        console.log("Sending TIMER_EXPIRED message to tab:", tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: "TIMER_EXPIRED",
+        });
+        console.log("Message response:", response);
+      } catch (error) {
+        console.log(`Could not send message to tab ${tab.id}:`, error);
+        // If content script isn't ready, try injecting it
+        try {
+          console.log("Attempting to inject content script into tab:", tab.id);
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"],
+          });
+          // Try sending message again after injection
+          const retryResponse = await chrome.tabs.sendMessage(tab.id, {
+            type: "TIMER_EXPIRED",
+          });
+          console.log("Retry message response:", retryResponse);
+        } catch (injectionError) {
+          console.log(
+            `Failed to inject content script or send message to tab ${tab.id}:`,
+            injectionError
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error handling timer expiration:", error);
+  }
+
+  // Clean up storage
+  console.log("Cleaning up storage for hostname:", hostname);
+  chrome.storage.local.remove(hostname);
+}
+
+// Note: Replaced alarm-based system with interval-based system for pause/resume functionality
