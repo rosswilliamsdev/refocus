@@ -7,24 +7,28 @@ reFocus is a Chrome extension designed to help you maintain focus and develop he
 ## ✨ Features
 
 ### 🕐 **Smart Timer Management**
+
 - Set custom timer durations for any website (minutes and seconds)
 - Automatic timer activation when visiting managed sites
 - **Tab-aware timing**: Timers pause when you switch tabs and resume when you return
 - Persistent settings across browser sessions
 
 ### 🛡️ **Focused Experience**
+
 - **True modal blocking**: When time expires, the entire page becomes inaccessible
-- **No escape routes**: Stop and reset buttons removed to prevent circumvention
+- **No escape routes**: No circumvention of the timers without friction
 - **Mandatory cooldowns**: Enforced break periods before you can browse again
 - Focus-trapped modal that can't be dismissed until action is taken
 
 ### ⚙️ **Flexible Configuration**
+
 - **In-modal settings**: Configure both timer and cooldown durations when time expires
 - **Per-site customization**: Different timer and cooldown settings for each website
 - **Persistent preferences**: Your settings are saved and remembered
 - Clean, intuitive interface focused on your goals
 
 ### 📱 **Intuitive Interface**
+
 - **Popup interface**: Quick access to current site timer controls
 - **Management page**: Comprehensive view of all managed sites and their timers
 - **Real-time countdown**: See exactly how much time remains
@@ -33,9 +37,11 @@ reFocus is a Chrome extension designed to help you maintain focus and develop he
 ## 🚀 Installation
 
 ### From Chrome Web Store (Coming Soon)
-*Extension will be available on the Chrome Web Store*
+
+_Extension will be available on the Chrome Web Store_
 
 ### Manual Installation (Developer Mode)
+
 1. Download or clone this repository
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable "Developer mode" in the top right corner
@@ -45,12 +51,14 @@ reFocus is a Chrome extension designed to help you maintain focus and develop he
 ## 🎮 How to Use
 
 ### Adding Websites
+
 1. **Navigate to a distracting website** (e.g., social media, news, etc.)
 2. **Click the reFocus extension icon** in your toolbar
 3. **Click "Add Current Site"** to add it to your managed sites list
 4. **Set your timer and cooldown preferences**
 
 ### Managing Your Sites
+
 1. **Click "Manage All Timers"** in the popup to open the management page
 2. **Configure individual settings** for each site:
    - **Timer duration**: How long you can browse (minutes/seconds)
@@ -58,6 +66,7 @@ reFocus is a Chrome extension designed to help you maintain focus and develop he
 3. **Start timers** when you're ready to begin focused browsing
 
 ### When Time Expires
+
 1. **Modal appears** blocking all website interaction
 2. **Wait for cooldown** to complete (no skipping allowed)
 3. **Configure new timer** and cooldown settings in the modal
@@ -66,18 +75,21 @@ reFocus is a Chrome extension designed to help you maintain focus and develop he
 ## 🔧 Technical Details
 
 ### Architecture
+
 - **Manifest V3** Chrome extension
 - **Background service worker** for timer management
 - **Content scripts** for modal injection and page interaction
 - **Chrome Storage API** for persistent data
 
 ### Timer System
+
 - **Interval-based countdown** with pause/resume capability
 - **Tab visibility detection** for smart pause/resume
 - **Persistent state management** across page refreshes
 - **Automatic cleanup** of expired timers
 
 ### Security Features
+
 - **CSP-compliant** modal creation (no innerHTML)
 - **Focus trapping** within modals
 - **Event propagation blocking** for true modal behavior
@@ -102,12 +114,14 @@ refocus/
 ## 🎯 Key Benefits
 
 ### For Focus & Productivity
+
 - **Prevents mindless browsing** with intentional time limits
 - **Builds awareness** of time spent on distracting sites
 - **Creates natural breaks** through mandatory cooldowns
 - **Encourages intentional** rather than habitual browsing
 
 ### For Digital Wellbeing
+
 - **Reduces endless scrolling** and time-wasting
 - **Promotes healthier** online habits
 - **Provides accountability** through non-circumventable limits
@@ -139,12 +153,14 @@ reFocus is specifically designed to prevent common workarounds:
 Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
 
 ### Development Setup
+
 1. Clone the repository
 2. Make your changes
 3. Test thoroughly in Chrome's developer mode
 4. Submit a pull request with clear description
 
 ### Areas for Contribution
+
 - 🐛 **Bug fixes** and stability improvements
 - 💡 **Feature suggestions** and implementations
 - 🎨 **UI/UX enhancements** and design improvements
