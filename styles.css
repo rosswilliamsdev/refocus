@@ -1,3 +1,12 @@
+.all-timers-btn {
+  background: #2563eb;
+  color: white;
+  width: 10rem;
+  padding: 8px 12px;
+  font-size: 12px;
+  align-self: center;
+}
+
 body {
   width: 350px;
   padding: 20px;
@@ -20,6 +29,102 @@ body.manage-page {
   margin-bottom: 20px;
 }
 
+/* Global controls section for management page */
+.global-controls-section {
+  background: #e8f5e9;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #81c784;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+  overflow: hidden;
+}
+
+.global-controls-section .global-timer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.global-controls-section .global-timer-header:hover {
+  background: #dcedc8;
+}
+
+.global-controls-section h2 {
+  margin: 0;
+  color: #2e7d32;
+  font-size: 18px;
+}
+
+.global-controls-section .chevron {
+  color: #2e7d32;
+  font-size: 14px;
+  transition: transform 0.2s;
+}
+
+.global-controls-section .global-timer-content {
+  padding: 0 20px 20px 20px;
+  animation: slideDown 0.2s ease-out;
+}
+
+.global-controls-section .global-timer-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  padding: 20px 0;
+}
+
+.global-controls-section .timer-input-group {
+  display: grid;
+  grid-template-columns: 80px auto;
+  align-items: center;
+  gap: 15px;
+  width: 280px;
+}
+
+.global-controls-section .timer-input-group strong {
+  text-align: right;
+  color: #2e7d32;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.global-controls-section .timer-input-group > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-controls-section .timer-input-group input {
+  width: 60px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.global-controls-section .timer-input-group span {
+  font-weight: bold;
+  color: #555;
+  font-size: 16px;
+}
+
+.global-controls-section .global-status {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #2e7d32;
+  font-weight: 500;
+  text-align: center;
+  width: 100%;
+}
+
 .add-site-section {
   background: #f5f5f5;
   padding: 15px;
@@ -30,6 +135,92 @@ body.manage-page {
 .current-site-info {
   margin-bottom: 15px;
   word-break: break-word;
+}
+
+/* Global timer styles */
+.global-timer-section {
+  background: #e8f5e9;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #81c784;
+  overflow: hidden;
+}
+
+.global-timer-header {
+  display: flex;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.global-timer-header:hover {
+  background: #dcedc8;
+}
+
+.global-timer-header h3 {
+  margin: 0;
+  color: #2e7d32;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.chevron {
+  color: #2e7d32;
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.global-timer-content {
+  padding: 0 15px 15px 15px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.global-timer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.global-timer-controls .timer-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-timer-controls .timer-input-group label {
+  font-weight: 500;
+  color: #555;
+}
+
+.global-timer-controls .timer-input-group input {
+  width: 50px;
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.global-timer-controls .timer-input-group span {
+  font-weight: bold;
+  color: #555;
+}
+
+.global-status {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #2e7d32;
+  font-weight: 500;
 }
 
 .add-site-controls {
@@ -105,6 +296,10 @@ body.manage-page {
 .sites-container {
   max-height: 300px;
   overflow-y: auto;
+}
+
+.timer-spacer {
+  margin-left: 1.75rem;
 }
 
 /* Manage page grid layout */

@@ -4,6 +4,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const manageTimersBtn = document.getElementById("manageTimersBtn");
   const currentSiteTimer = document.getElementById("currentSiteTimer");
   const siteNotManaged = document.getElementById("siteNotManaged");
+  
+  // Global timer elements
+  const globalTimerHeader = document.getElementById("globalTimerHeader");
+  const globalTimerContent = document.getElementById("globalTimerContent");
+  const globalChevron = document.getElementById("globalChevron");
+  const globalMinutesEl = document.getElementById("globalMinutes");
+  const globalSecondsEl = document.getElementById("globalSeconds");
+  const globalCooldownMinutesEl = document.getElementById("globalCooldownMinutes");
+  const globalCooldownSecondsEl = document.getElementById("globalCooldownSeconds");
+  const startGlobalTimerBtn = document.getElementById("startGlobalTimer");
+  const stopGlobalTimerBtn = document.getElementById("stopGlobalTimer");
+  const globalStatusEl = document.getElementById("globalStatus");
 
   let currentHostname = "";
   let siteTimers = {}; // Store timer intervals for each site
@@ -256,25 +268,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 1000);
   }
 
-  // Remove site from the list
-  async function removeSite(hostname) {
-    const sites = await loadSitesList();
-    const filteredSites = sites.filter((site) => site.hostname !== hostname);
-
-    await saveSitesList(filteredSites);
-
-    // Clear any active timer and storage for this site
-    await chrome.alarms.clear(`timer_${hostname}`);
-    await chrome.storage.local.remove(hostname);
-
-    // Clear timer interval if running
-    if (siteTimers[hostname]) {
-      clearInterval(siteTimers[hostname]);
-      delete siteTimers[hostname];
-    }
-
-    await renderCurrentSiteTimer(true); // Force render after timer state changes
-  }
 
   // Render a single site item
   async function createSiteElement(site) {
@@ -569,6 +562,117 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 2000);
   }
 
+  // Start all timers globally
+  async function startGlobalTimers() {
+    const minutes = parseInt(globalMinutesEl.value) || 0;
+    const seconds = parseInt(globalSecondsEl.value) || 0;
+    const cooldownMinutes = parseInt(globalCooldownMinutesEl.value) || 0;
+    const cooldownSeconds = parseInt(globalCooldownSecondsEl.value) || 0;
+    
+    if (minutes === 0 && seconds === 0) {
+      showTemporaryMessage("Please enter a valid time");
+      return;
+    }
+    
+    const sites = await loadSitesList();
+    if (sites.length === 0) {
+      showTemporaryMessage("No sites to manage");
+      return;
+    }
+    
+    const totalMs = (minutes * 60 + seconds) * 1000;
+    let startedCount = 0;
+    
+    // Save global cooldown settings for each site
+    for (const site of sites) {
+      await saveCooldownForSite(site.hostname, cooldownMinutes, cooldownSeconds);
+    }
+    
+    // Start timer for each site
+    for (const site of sites) {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "START_TIMER",
+          hostname: site.hostname,
+          duration: totalMs,
+        });
+        
+        if (response && response.success) {
+          startedCount++;
+        }
+      } catch (error) {
+        console.error(`Failed to start timer for ${site.hostname}:`, error);
+      }
+    }
+    
+    if (startedCount > 0) {
+      showTemporaryMessage(`Started timers for ${startedCount} site(s)`);
+      globalStatusEl.textContent = `Active: ${startedCount} timers running`;
+      startGlobalTimerBtn.style.display = "none";
+      stopGlobalTimerBtn.style.display = "inline-block";
+      
+      // Refresh current site timer display
+      await renderCurrentSiteTimer(true);
+    } else {
+      showTemporaryMessage("Failed to start timers");
+    }
+  }
+  
+  // Stop all timers globally
+  async function stopGlobalTimers() {
+    const sites = await loadSitesList();
+    let stoppedCount = 0;
+    
+    for (const site of sites) {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "STOP_TIMER",
+          hostname: site.hostname,
+        });
+        
+        if (response && response.success) {
+          stoppedCount++;
+        }
+      } catch (error) {
+        console.error(`Failed to stop timer for ${site.hostname}:`, error);
+      }
+    }
+    
+    if (stoppedCount > 0) {
+      showTemporaryMessage(`Stopped ${stoppedCount} timer(s)`);
+      globalStatusEl.textContent = "";
+      startGlobalTimerBtn.style.display = "inline-block";
+      stopGlobalTimerBtn.style.display = "none";
+      
+      // Refresh current site timer display
+      await renderCurrentSiteTimer(true);
+    }
+  }
+  
+  // Check if any timers are active
+  async function checkActiveTimers() {
+    const sites = await loadSitesList();
+    let activeCount = 0;
+    
+    for (const site of sites) {
+      const result = await chrome.storage.local.get([site.hostname]);
+      const timerData = result[site.hostname];
+      if (timerData && timerData.isActive) {
+        activeCount++;
+      }
+    }
+    
+    if (activeCount > 0) {
+      globalStatusEl.textContent = `Active: ${activeCount} timer(s) running`;
+      startGlobalTimerBtn.style.display = "none";
+      stopGlobalTimerBtn.style.display = "inline-block";
+    } else {
+      globalStatusEl.textContent = "";
+      startGlobalTimerBtn.style.display = "inline-block";
+      stopGlobalTimerBtn.style.display = "none";
+    }
+  }
+
   // Event listeners
   addCurrentSiteBtn.addEventListener("click", async () => {
     if (!currentHostname) {
@@ -581,14 +685,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   manageTimersBtn.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("manage.html") });
   });
+  
+  // Global timer event listeners
+  startGlobalTimerBtn.addEventListener("click", startGlobalTimers);
+  stopGlobalTimerBtn.addEventListener("click", stopGlobalTimers);
+  
+  // Toggle global timer section
+  globalTimerHeader.addEventListener("click", () => {
+    const isVisible = globalTimerContent.style.display !== "none";
+    globalTimerContent.style.display = isVisible ? "none" : "block";
+    globalChevron.textContent = isVisible ? "▶" : "▼";
+    globalChevron.style.transform = isVisible ? "rotate(0deg)" : "rotate(0deg)";
+  });
 
   // Initialize
   await getCurrentSite();
   await renderCurrentSiteTimer();
+  await checkActiveTimers();
 
   // Update current site info periodically
   setInterval(async () => {
     await getCurrentSite();
     await renderCurrentSiteTimer(true); // Force render after timer state changes
+    await checkActiveTimers();
   }, 1000);
 });

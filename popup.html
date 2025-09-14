@@ -25,6 +25,32 @@
       </div>
     </div>
 
+    <div class="global-timer-section">
+      <div class="global-timer-header" id="globalTimerHeader">
+        <h3>Global Timer Control</h3>
+        <span class="chevron" id="globalChevron">▶</span>
+      </div>
+      <div class="global-timer-content" id="globalTimerContent" style="display: none;">
+        <div class="global-timer-controls">
+          <div class="timer-input-group">
+            <label>Timer:</label>
+            <input type="number" id="globalMinutes" min="0" max="999" value="5" />
+            <span>:</span>
+            <input type="number" id="globalSeconds" min="0" max="59" value="0" />
+          </div>
+          <div class="timer-input-group">
+            <label>Cooldown:</label>
+            <input type="number" id="globalCooldownMinutes" min="0" max="999" value="0" />
+            <span>:</span>
+            <input type="number" id="globalCooldownSeconds" min="0" max="59" value="20" />
+          </div>
+          <button id="startGlobalTimer" class="start-btn">Start All Timers</button>
+          <button id="stopGlobalTimer" class="stop-btn" style="display: none;">Stop All Timers</button>
+        </div>
+        <div id="globalStatus" class="global-status"></div>
+      </div>
+    </div>
+
     <div class="manage-section">
       <button id="manageTimersBtn" class="manage-btn">Manage All Timers</button>
     </div>

@@ -3,6 +3,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   const addManualSiteBtn = document.getElementById("addManualSite");
   const sitesContainer = document.getElementById("sitesContainer");
   // const saveAllBtn = document.getElementById("saveAllBtn"); // Removed button
+  
+  // Global timer elements
+  const globalTimerHeader = document.getElementById("globalTimerHeader");
+  const globalTimerContent = document.getElementById("globalTimerContent");
+  const globalChevron = document.getElementById("globalChevron");
+  const globalMinutesEl = document.getElementById("globalMinutes");
+  const globalSecondsEl = document.getElementById("globalSeconds");
+  const globalCooldownMinutesEl = document.getElementById("globalCooldownMinutes");
+  const globalCooldownSecondsEl = document.getElementById("globalCooldownSeconds");
+  const startAllTimersBtn = document.getElementById("startAllTimers");
+  const globalStatusEl = document.getElementById("globalStatus");
 
   let siteTimers = {}; // Store timer intervals for each site
 
@@ -449,39 +460,77 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 2000);
   }
 
-  // Save all timer and cooldown settings
-  async function saveAllSettings() {
-    const minutesInputs = document.querySelectorAll('input[id^="minutes-"]');
+
+  // Start all timers globally
+  async function startAllTimers() {
+    const minutes = parseInt(globalMinutesEl.value) || 0;
+    const seconds = parseInt(globalSecondsEl.value) || 0;
+    const cooldownMinutes = parseInt(globalCooldownMinutesEl.value) || 0;
+    const cooldownSeconds = parseInt(globalCooldownSecondsEl.value) || 0;
     
-    let savedCount = 0;
-    
-    for (const minutesInput of minutesInputs) {
-      const hostname = minutesInput.id.replace('minutes-', '');
-      const secondsInput = document.getElementById(`seconds-${hostname}`);
-      
-      // Save timer settings
-      if (secondsInput) {
-        const minutes = parseInt(minutesInput.value) || 0;
-        const seconds = parseInt(secondsInput.value) || 0;
-        await saveTimerForSite(hostname, minutes, seconds);
-      }
-      
-      // Save cooldown settings
-      const cooldownMinutesInput = document.getElementById(`cooldown-minutes-${hostname}`);
-      const cooldownSecondsInput = document.getElementById(`cooldown-seconds-${hostname}`);
-      
-      if (cooldownMinutesInput && cooldownSecondsInput) {
-        // Get current saved values to use as fallback
-        const currentCooldown = await getCooldownForSite(hostname);
-        const cooldownMinutes = parseInt(cooldownMinutesInput.value) || currentCooldown.minutes;
-        const cooldownSeconds = parseInt(cooldownSecondsInput.value) || currentCooldown.seconds;
-        await saveCooldownForSite(hostname, cooldownMinutes, cooldownSeconds);
-      }
-      
-      savedCount++;
+    if (minutes === 0 && seconds === 0) {
+      showTemporaryMessage("Please enter a valid time");
+      return;
     }
     
-    showTemporaryMessage(`Saved timer and cooldown settings for ${savedCount} sites!`);
+    const sites = await loadSitesList();
+    if (sites.length === 0) {
+      showTemporaryMessage("No sites to manage");
+      return;
+    }
+    
+    const totalMs = (minutes * 60 + seconds) * 1000;
+    let startedCount = 0;
+    
+    // Save global cooldown settings for each site
+    for (const site of sites) {
+      await saveCooldownForSite(site.hostname, cooldownMinutes, cooldownSeconds);
+    }
+    
+    // Start timer for each site
+    for (const site of sites) {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "START_TIMER",
+          hostname: site.hostname,
+          duration: totalMs,
+        });
+        
+        if (response && response.success) {
+          startedCount++;
+        }
+      } catch (error) {
+        console.error(`Failed to start timer for ${site.hostname}:`, error);
+      }
+    }
+    
+    if (startedCount > 0) {
+      showTemporaryMessage(`Started timers for ${startedCount} site(s) with ${cooldownMinutes}:${cooldownSeconds.toString().padStart(2, '0')} cooldown`);
+      globalStatusEl.textContent = `Active: ${startedCount} timers running`;
+      await renderSitesList(); // Refresh the display
+    } else {
+      showTemporaryMessage("Failed to start timers");
+    }
+  }
+  
+  // Check if any timers are active
+  async function checkActiveTimers() {
+    const sites = await loadSitesList();
+    let activeCount = 0;
+    
+    for (const site of sites) {
+      const result = await chrome.storage.local.get([site.hostname]);
+      const timerData = result[site.hostname];
+      if (timerData && timerData.isActive) {
+        activeCount++;
+      }
+    }
+    
+    if (activeCount > 0) {
+      globalStatusEl.textContent = `Active: ${activeCount} timer(s) running`;
+    } else {
+      globalStatusEl.textContent = "";
+    }
   }
 
   // Event listeners
@@ -506,6 +555,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       addManualSiteBtn.click();
     }
   });
+  
+  // Global timer event listeners
+  startAllTimersBtn.addEventListener("click", startAllTimers);
+  
+  // Toggle global timer section
+  globalTimerHeader.addEventListener("click", () => {
+    const isVisible = globalTimerContent.style.display !== "none";
+    globalTimerContent.style.display = isVisible ? "none" : "block";
+    globalChevron.textContent = isVisible ? "▶" : "▼";
+  });
 
   // Listen for storage changes (when sites are added from popup)
   chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -517,4 +576,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize
   await renderSitesList();
+  await checkActiveTimers();
+  
+  // Update active timer count periodically
+  setInterval(checkActiveTimers, 1000);
 });
